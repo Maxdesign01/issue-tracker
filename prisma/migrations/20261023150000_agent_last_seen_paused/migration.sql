@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Agent" ADD COLUMN "lastSeenAt" TIMESTAMP(3);
+ALTER TABLE "Agent" ADD COLUMN "pausedAt" TIMESTAMP(3);

@@ -2,7 +2,7 @@
 
 import type { AgentLevel } from "@prisma/client";
 import { useState, useTransition } from "react";
-import { regenerateAgentKeyAction, revokeAgentAction, setAgentAreaPreferencesAction, setAgentBurstAction, setAgentLevelAction } from "./actions";
+import { regenerateAgentKeyAction, revokeAgentAction, setAgentAreaPreferencesAction, setAgentBurstAction, setAgentLevelAction, toggleAgentPausedAction } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -36,6 +36,7 @@ export function AgentControls({
   canSetBurst = false,
   areas = [],
   areaPreferences = [],
+  paused = false,
 }: {
   agentId: string;
   agentName: string;
@@ -55,10 +56,12 @@ export function AgentControls({
   canSetBurst?: boolean;
   areas?: { id: string; name: string; projectId: string }[];
   areaPreferences?: { projectId: string; projectAreaId: string }[];
+  paused?: boolean;
 }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [current, setCurrent] = useState(level);
+  const [isPaused, setIsPaused] = useState(paused);
   const initialUntil = burstUntil ? new Date(burstUntil) : null;
   const initialUntilIso =
     initialUntil && Number.isFinite(initialUntil.getTime()) ? initialUntil.toISOString() : null;
@@ -228,6 +231,19 @@ export function AgentControls({
     });
   }
 
+  function handleTogglePause() {
+    const next = !isPaused;
+    startTransition(async () => {
+      const result = await toggleAgentPausedAction(agentId, next);
+      if (result.ok) {
+        setIsPaused(next);
+        toast(next ? `${agentName} paused.` : `${agentName} resumed.`, "success");
+      } else {
+        toast(result.error, "error");
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:items-end">
       <div className="flex flex-wrap items-center gap-2">
@@ -323,6 +339,14 @@ export function AgentControls({
         ) : burstOn ? (
           <span className="text-xs text-slate-500">High-volume</span>
         ) : null}
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={handleTogglePause}
+          disabled={pending}
+        >
+          {isPaused ? "Resume" : "Pause"}
+        </Button>
         <Button type="button" variant="secondary" onClick={regenerate} disabled={pending || !projectId}>
           Regenerate key
         </Button>

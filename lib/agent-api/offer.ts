@@ -17,6 +17,8 @@ import { deliveryDeadline, deliveryWindowMinutes } from "@/lib/claim-deadline";
 
 /** Pure helper/tests default; requests use the project's offerWindowSeconds. */
 export const OFFER_TTL_MS = DEFAULT_PROJECT_WORKFLOW.offerWindowSeconds * 1000;
+/** How long since last seen before an agent is considered offline (#592). */
+export const AGENT_ONLINE_THRESHOLD_MS = 5 * 60 * 1000;
 const id = z.string().trim().min(1).max(191);
 export const offerSchema = z.object({ projectId: id.optional() }).strict();
 
@@ -76,13 +78,14 @@ export async function offerNext(db: Db, caller: { agentId?: string; tenantId: st
     select: { id: true },
   });
   if (existingOffer) return null;
+  const onlineCutoff = new Date(Date.now() - AGENT_ONLINE_THRESHOLD_MS);
   const memberships = await db.membership.findMany({
     where: {
       tenantId: caller.tenantId,
-      user: { agents: { some: { tenantId: caller.tenantId, revokedAt: null, level: { in: ["contributor", "reviewer", "merger"] } } } },
+      user: { agents: { some: { tenantId: caller.tenantId, revokedAt: null, pausedAt: null, lastSeenAt: { gte: onlineCutoff }, level: { in: ["contributor", "reviewer", "merger"] } } } },
     },
     select: { userId: true, user: { select: { agents: {
-      where: { tenantId: caller.tenantId, revokedAt: null, level: { in: ["contributor", "reviewer", "merger"] } },
+      where: { tenantId: caller.tenantId, revokedAt: null, pausedAt: null, lastSeenAt: { gte: onlineCutoff }, level: { in: ["contributor", "reviewer", "merger"] } },
       orderBy: { createdAt: "asc" }, select: {
         id: true,
         areaPreferences: { where: { projectAreaId: bug.areaId ?? "" }, select: { projectAreaId: true } },

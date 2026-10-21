@@ -199,5 +199,40 @@ describe("ticket offers", () => {
       message: "This issue already has an active claim.",
     });
   });
+
+  it("offerNext queries only online and unpaused agents (#592)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+
+    const findManySpy = vi.fn().mockResolvedValue([]);
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      membership: {
+        findMany: findManySpy,
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).toBeNull();
+    expect(findManySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-1",
+          user: {
+            agents: {
+              some: expect.objectContaining({
+                tenantId: "tenant-1",
+                revokedAt: null,
+                pausedAt: null,
+                lastSeenAt: expect.objectContaining({ gte: expect.any(Date) }),
+              }),
+            },
+          },
+        }),
+      }),
+    );
+  });
 });
 

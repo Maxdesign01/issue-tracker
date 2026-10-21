@@ -213,6 +213,26 @@ export async function setAgentLevel(actor: Actor, agentId: string, level: AgentL
   return { ok: true };
 }
 
+/**
+ * Pause or resume an agent (#592). Paused agents are never offered work.
+ */
+export async function setAgentPaused(
+  actor: Actor,
+  agentId: string,
+  paused: boolean,
+  now = new Date(),
+): Promise<ManageResult> {
+  const managed = await managedAgent(actor, agentId);
+  if (!managed) return { ok: false, error: NOT_FOUND };
+  if (managed.agent.revokedAt) return { ok: false, error: "That agent is revoked." };
+
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { pausedAt: paused ? now : null },
+  });
+  return { ok: true };
+}
+
 /** Save an agent's preferred areas for one project (#609). */
 export async function setAgentAreaPreferences(
   actor: Actor,

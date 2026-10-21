@@ -36,6 +36,8 @@ export type AgentContext = {
   projectId?: string | null;
   /** Slug of that project, for the error shown when the key is used elsewhere. */
   projectSlug?: string | null;
+  lastSeenAt?: Date | null;
+  pausedAt?: Date | null;
 };
 
 export type AgentAuthFailure = "missing_key" | "invalid_key" | "revoked";
@@ -106,6 +108,8 @@ export async function requireAgent(request: HeaderSource): Promise<AgentContext>
           level: true,
           burst: true,
           burstUntil: true,
+          lastSeenAt: true,
+          pausedAt: true,
           revokedAt: true,
           owner: { select: { memberships: { select: { tenantId: true } } } },
         },
@@ -122,6 +126,7 @@ export async function requireAgent(request: HeaderSource): Promise<AgentContext>
   }
 
   // Update lastUsedAt on successful auth, throttled to at most once per minute (#535)
+  // Also update Agent.lastSeenAt throttled to at most once per minute (#592)
   const now = new Date();
   if (
     typeof prisma.agentApiKey?.update === "function" &&
@@ -137,6 +142,20 @@ export async function requireAgent(request: HeaderSource): Promise<AgentContext>
     });
   }
 
+  if (
+    typeof prisma.agent?.update === "function" &&
+    (!agent.lastSeenAt || now.getTime() - agent.lastSeenAt.getTime() >= LAST_USED_THROTTLE_MS)
+  ) {
+    await Promise.resolve(
+      prisma.agent.update({
+        where: { id: agent.id },
+        data: { lastSeenAt: now },
+      }),
+    ).catch((error) => {
+      logger.error("[requireAgent] failed to update lastSeenAt", error);
+    });
+  }
+
   return {
     agentId: agent.id,
     name: agent.name,
@@ -148,6 +167,8 @@ export async function requireAgent(request: HeaderSource): Promise<AgentContext>
     keyId: key.id,
     projectId: key.projectId,
     projectSlug: key.project?.slug ?? null,
+    lastSeenAt: agent.lastSeenAt,
+    pausedAt: agent.pausedAt,
   };
 }
 

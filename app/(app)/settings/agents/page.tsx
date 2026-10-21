@@ -102,6 +102,8 @@ export default async function AgentsSettingsPage() {
             burstUntil: true,
             createdAt: true,
             revokedAt: true,
+            lastSeenAt: true,
+            pausedAt: true,
             defaultProjectId: true,
             apiKeys: {
               where: { revokedAt: null },
@@ -129,7 +131,7 @@ export default async function AgentsSettingsPage() {
                   where: { tenantId, revokedAt: null },
                   orderBy: { createdAt: "asc" },
                   select: {
-                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true,
+                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true, lastSeenAt: true, pausedAt: true,
                     areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
                   },
                 },
@@ -269,10 +271,23 @@ export default async function AgentsSettingsPage() {
                   <li key={agent.id} className="flex flex-col gap-2 py-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <p className="break-words font-medium text-slate-900">
+                      <p className="flex items-center flex-wrap gap-1.5 break-words font-medium text-slate-900">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${
+                            agent.lastSeenAt && now.getTime() - new Date(agent.lastSeenAt).getTime() < 5 * 60 * 1000
+                              ? "bg-emerald-500"
+                              : "bg-slate-300"
+                          }`}
+                          title={
+                            agent.lastSeenAt && now.getTime() - new Date(agent.lastSeenAt).getTime() < 5 * 60 * 1000
+                              ? "Online"
+                              : "Offline"
+                          }
+                        />
                         {agent.name}
                         {agent.defaultProjectId ? <span className="font-normal text-slate-500"> · personal</span> : null}
                         {agent.model ? <span className="font-normal text-slate-500"> · {agent.model}</span> : null}
+                        {agent.pausedAt ? <Badge className="bg-amber-50 text-amber-800 text-[10px] px-1.5 py-0.5">Paused</Badge> : null}
                       </p>
                       <Link href={`/settings/agents/${agent.id}/messages`} className="text-xs text-teal-700 hover:underline">
                         Messages and instructions
@@ -286,7 +301,11 @@ export default async function AgentsSettingsPage() {
                           <span>No key · added <LocalTime date={agent.createdAt} /></span>
                         ) : (
                           <span>
-                            {agent.apiKeys.some((key) => key.lastUsedAt) ? (
+                            {agent.lastSeenAt ? (
+                              <>
+                                Seen <RelativeTime date={agent.lastSeenAt} />
+                              </>
+                            ) : agent.apiKeys.some((key) => key.lastUsedAt) ? (
                               <>
                                 Last used <RelativeTime date={agent.apiKeys.find((key) => key.lastUsedAt)!.lastUsedAt!} />
                               </>
@@ -325,6 +344,7 @@ export default async function AgentsSettingsPage() {
                         burstUntil={agent.burstUntil}
                         now={now}
                         canSetBurst={isAdmin}
+                        paused={Boolean(agent.pausedAt)}
                         areas={areas}
                         areaPreferences={agent.areaPreferences.map((preference) => ({ projectId: preference.projectArea.projectId, projectAreaId: preference.projectAreaId }))}
                       />
@@ -356,9 +376,25 @@ export default async function AgentsSettingsPage() {
                     <ul className="mt-2 space-y-2">
                       {member.agents.map((agent) => (
                         <li key={agent.id} className="flex flex-col gap-2 pl-4 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="text-sm text-slate-700">
+                          <span className="flex items-center flex-wrap gap-1.5 text-sm text-slate-700">
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${
+                                agent.lastSeenAt && now.getTime() - new Date(agent.lastSeenAt).getTime() < 5 * 60 * 1000
+                                  ? "bg-emerald-500"
+                                  : "bg-slate-300"
+                              }`}
+                              title={
+                                agent.lastSeenAt && now.getTime() - new Date(agent.lastSeenAt).getTime() < 5 * 60 * 1000
+                                  ? "Online"
+                                  : "Offline"
+                              }
+                            />
                             {agent.name}
                             {agent.model ? <span className="text-slate-500"> · {agent.model}</span> : null}
+                            {agent.pausedAt ? <Badge className="bg-amber-50 text-amber-800 text-[10px] px-1.5 py-0.5">Paused</Badge> : null}
+                            <span className="text-xs text-slate-400">
+                              · {agent.lastSeenAt ? <>seen <RelativeTime date={agent.lastSeenAt} /></> : "never seen"}
+                            </span>
                             {isAdmin && member.id !== user.id ? (
                               <>
                                 {" "}·{" "}
@@ -380,6 +416,7 @@ export default async function AgentsSettingsPage() {
                               burstUntil={agent.burstUntil}
                               now={now}
                               canSetBurst
+                              paused={Boolean(agent.pausedAt)}
                               areas={areas}
                               areaPreferences={agent.areaPreferences.map((preference) => ({ projectId: preference.projectArea.projectId, projectAreaId: preference.projectAreaId }))}
                             />
