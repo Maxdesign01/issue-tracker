@@ -234,5 +234,234 @@ describe("ticket offers", () => {
       }),
     );
   });
+
+  it("offers work to the person's most recently active agent (#591)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+    const events = await import("@/lib/agent-api/events");
+    vi.spyOn(events, "publish").mockResolvedValue({ id: "event-1" });
+
+    const now = new Date();
+    const olderActive = new Date(now.getTime() - 2 * 60 * 1000);
+    const newerActive = new Date(now.getTime() - 10 * 1000);
+
+    const claimCreateSpy = vi.fn().mockImplementation(async ({ data }) => ({
+      id: "claim-1",
+      ...data,
+      offeredAt: now,
+    }));
+
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        groupBy: vi.fn().mockResolvedValue([]),
+        create: claimCreateSpy,
+      },
+      membership: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            userId: "user-1",
+            user: {
+              agents: [
+                { id: "agent-older", level: "contributor", lastSeenAt: olderActive, createdAt: new Date("2026-01-01") },
+                { id: "agent-newer", level: "contributor", lastSeenAt: newerActive, createdAt: new Date("2026-01-02") },
+              ],
+            },
+          },
+        ]),
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).not.toBeNull();
+    expect(claimCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          beneficiaryUserId: "user-1",
+          agentId: "agent-newer",
+        }),
+      }),
+    );
+  });
+
+  it("covers a person with two agents where the older one is offline (#591)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+    const events = await import("@/lib/agent-api/events");
+    vi.spyOn(events, "publish").mockResolvedValue({ id: "event-1" });
+
+    const now = new Date();
+    const offlineSeen = new Date(now.getTime() - 10 * 60 * 1000);
+    const onlineSeen = new Date(now.getTime() - 30 * 1000);
+
+    const claimCreateSpy = vi.fn().mockImplementation(async ({ data }) => ({
+      id: "claim-1",
+      ...data,
+      offeredAt: now,
+    }));
+
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        groupBy: vi.fn().mockResolvedValue([]),
+        create: claimCreateSpy,
+      },
+      membership: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            userId: "user-1",
+            user: {
+              agents: [
+                { id: "agent-old-offline", level: "contributor", lastSeenAt: offlineSeen, createdAt: new Date("2026-01-01") },
+                { id: "agent-new-online", level: "contributor", lastSeenAt: onlineSeen, createdAt: new Date("2026-01-02") },
+              ],
+            },
+          },
+        ]),
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).not.toBeNull();
+    expect(claimCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          beneficiaryUserId: "user-1",
+          agentId: "agent-new-online",
+        }),
+      }),
+    );
+  });
+
+  it("skips a person whose agents are all offline (#591)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+
+    const now = new Date();
+    const offlineSeen = new Date(now.getTime() - 10 * 60 * 1000);
+
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      membership: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            userId: "user-1",
+            user: {
+              agents: [
+                { id: "agent-offline", level: "contributor", lastSeenAt: offlineSeen, createdAt: new Date("2026-01-01") },
+              ],
+            },
+          },
+        ]),
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).toBeNull();
+  });
+
+  it("prefers an agent that volunteered for this issue over one seen more recently (#591)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+    const events = await import("@/lib/agent-api/events");
+    vi.spyOn(events, "publish").mockResolvedValue({ id: "event-1" });
+
+    const now = new Date();
+    const volunteerSeen = new Date(now.getTime() - 2 * 60 * 1000);
+    const nonVolunteerSeen = new Date(now.getTime() - 10 * 1000);
+
+    const claimCreateSpy = vi.fn().mockImplementation(async ({ data }) => ({
+      id: "claim-1",
+      ...data,
+      offeredAt: now,
+    }));
+
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        groupBy: vi.fn().mockResolvedValue([]),
+        create: claimCreateSpy,
+      },
+      issueInterest: {
+        findMany: vi.fn().mockResolvedValue([
+          { agentId: "agent-volunteer", beneficiaryUserId: "user-1" },
+        ]),
+      },
+      membership: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            userId: "user-1",
+            user: {
+              agents: [
+                { id: "agent-volunteer", level: "contributor", lastSeenAt: volunteerSeen, createdAt: new Date("2026-01-01") },
+                { id: "agent-active", level: "contributor", lastSeenAt: nonVolunteerSeen, createdAt: new Date("2026-01-02") },
+              ],
+            },
+          },
+        ]),
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).not.toBeNull();
+    expect(claimCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          beneficiaryUserId: "user-1",
+          agentId: "agent-volunteer",
+        }),
+      }),
+    );
+  });
+
+  it("prefers the highest level agent when lastSeenAt is identical (#591)", async () => {
+    const { offerNext } = await import("@/lib/agent-api/offer");
+    const events = await import("@/lib/agent-api/events");
+    vi.spyOn(events, "publish").mockResolvedValue({ id: "event-1" });
+
+    const now = new Date();
+    const seenAt = new Date(now.getTime() - 30 * 1000);
+
+    const claimCreateSpy = vi.fn().mockImplementation(async ({ data }) => ({
+      id: "claim-1",
+      ...data,
+      offeredAt: now,
+    }));
+
+    const dbMock = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "bug-1" }]),
+      issueClaim: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        groupBy: vi.fn().mockResolvedValue([]),
+        create: claimCreateSpy,
+      },
+      membership: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            userId: "user-1",
+            user: {
+              agents: [
+                { id: "agent-contrib", level: "contributor", lastSeenAt: seenAt, createdAt: new Date("2026-01-01") },
+                { id: "agent-merger", level: "merger", lastSeenAt: seenAt, createdAt: new Date("2026-01-02") },
+              ],
+            },
+          },
+        ]),
+      },
+    } as any;
+
+    const result = await offerNext(dbMock, { tenantId: "tenant-1" }, { id: "bug-1", projectId: "proj-1", title: "Bug 1" });
+    expect(result).not.toBeNull();
+    expect(claimCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          beneficiaryUserId: "user-1",
+          agentId: "agent-merger",
+        }),
+      }),
+    );
+  });
 });
 

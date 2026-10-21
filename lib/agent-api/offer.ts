@@ -14,6 +14,7 @@ import { ensureWatching } from "@/lib/watch";
 import { assertRedesignOpen } from "@/lib/redesigns";
 import { assertApprovalOpen } from "@/lib/approvals";
 import { deliveryDeadline, deliveryWindowMinutes } from "@/lib/claim-deadline";
+import { AGENT_LEVELS } from "@/lib/agents/levels";
 
 /** Pure helper/tests default; requests use the project's offerWindowSeconds. */
 export const OFFER_TTL_MS = DEFAULT_PROJECT_WORKFLOW.offerWindowSeconds * 1000;
@@ -79,6 +80,15 @@ export async function offerNext(db: Db, caller: { agentId?: string; tenantId: st
   });
   if (existingOffer) return null;
   const onlineCutoff = new Date(Date.now() - AGENT_ONLINE_THRESHOLD_MS);
+  const interests = typeof (db as { issueInterest?: { findMany?: unknown } }).issueInterest?.findMany === "function"
+    ? await db.issueInterest.findMany({
+        where: { bugId: bug.id, withdrawnAt: null },
+        select: { agentId: true, beneficiaryUserId: true },
+      })
+    : [];
+  const volunteeredAgentIds = new Set(interests.map((i) => i.agentId));
+  const volunteeredUserIds = new Set(interests.map((i) => i.beneficiaryUserId));
+
   const memberships = await db.membership.findMany({
     where: {
       tenantId: caller.tenantId,
@@ -88,15 +98,51 @@ export async function offerNext(db: Db, caller: { agentId?: string; tenantId: st
       where: { tenantId: caller.tenantId, revokedAt: null, pausedAt: null, lastSeenAt: { gte: onlineCutoff }, level: { in: ["contributor", "reviewer", "merger"] } },
       orderBy: { createdAt: "asc" }, select: {
         id: true,
+        level: true,
+        lastSeenAt: true,
+        createdAt: true,
         areaPreferences: { where: { projectAreaId: bug.areaId ?? "" }, select: { projectAreaId: true } },
       },
     } } } },
   });
   const people = memberships.flatMap((m) => {
-    if (!m.user.agents.length || excludeUserIds.includes(m.userId) || (bug.assigneeId && bug.assigneeId !== m.userId)) return [];
-    const preferred = bug.areaId ? m.user.agents.find((agent) => agent.areaPreferences.length > 0) : undefined;
-    const selected = preferred ?? m.user.agents[0];
-    return [{ beneficiaryUserId: m.userId, agentId: selected.id, areaMatch: Boolean(preferred) }];
+    const onlineAgents = (m.user.agents ?? []).filter((agent) => {
+      if ((agent as { revokedAt?: Date | null }).revokedAt) return false;
+      if ((agent as { pausedAt?: Date | null }).pausedAt) return false;
+      if (!agent.lastSeenAt || agent.lastSeenAt < onlineCutoff) return false;
+      return true;
+    });
+    if (!onlineAgents.length || excludeUserIds.includes(m.userId) || (bug.assigneeId && bug.assigneeId !== m.userId)) return [];
+
+    // Choose their agent: the one seen most recently, preferring one that volunteered for this issue, then the highest level (#591)
+    const sortedAgents = [...onlineAgents].sort((a, b) => {
+      const aVol = volunteeredAgentIds.has(a.id);
+      const bVol = volunteeredAgentIds.has(b.id);
+      if (aVol !== bVol) return (bVol ? 1 : 0) - (aVol ? 1 : 0);
+
+      const aSeen = a.lastSeenAt ? a.lastSeenAt.getTime() : 0;
+      const bSeen = b.lastSeenAt ? b.lastSeenAt.getTime() : 0;
+      if (bSeen !== aSeen) return bSeen - aSeen;
+
+      const aLevel = AGENT_LEVELS.indexOf(a.level);
+      const bLevel = AGENT_LEVELS.indexOf(b.level);
+      if (bLevel !== aLevel) return bLevel - aLevel;
+
+      const aCreated = a.createdAt ? a.createdAt.getTime() : 0;
+      const bCreated = b.createdAt ? b.createdAt.getTime() : 0;
+      return aCreated - bCreated || a.id.localeCompare(b.id);
+    });
+
+    const selected = sortedAgents[0];
+    const preferred = bug.areaId ? onlineAgents.find((agent) => agent.areaPreferences?.length > 0) : undefined;
+    const hasVolunteered = volunteeredUserIds.has(m.userId) || onlineAgents.some((a) => volunteeredAgentIds.has(a.id));
+
+    return [{
+      beneficiaryUserId: m.userId,
+      agentId: selected.id,
+      areaMatch: Boolean(preferred),
+      volunteered: hasVolunteered,
+    }];
   });
   if (!people.length) return null;
 
