@@ -14,6 +14,7 @@ import { extractMentionedUserIds, normalizeMentions } from "@/lib/mentions";
 import { commentDepth, MAX_COMMENT_DEPTH } from "@/lib/comments";
 import { publish } from "@/lib/agent-api/events";
 import { notifyLater } from "@/lib/notify";
+import { parseIssueRef } from "@/lib/duplicates";
 import type { NotificationEvent } from "@/lib/notifications";
 
 export class IssueApiError extends Error {
@@ -126,8 +127,13 @@ export async function listAgentIssues(scope: Scope, params: URLSearchParams) {
 }
 
 export async function readAgentIssue(scope: Scope, id: string) {
+  // #586: resolve numeric issue references (e.g. "586") to the internal cuid id
+  const ref = parseIssueRef(id);
+  const where = ref && "number" in ref
+    ? { ...scope, number: ref.number, isDeleted: false }
+    : { ...scope, id, isDeleted: false };
   const issue = await prisma.bug.findFirst({
-    where: { ...scope, id, isDeleted: false },
+    where,
     select: { ...issueSelect, comments: {
       where: { deletedAt: null }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100,
       select: { id: true, body: true, authorId: true, agentId: true, parentId: true, createdAt: true, editedAt: true },
@@ -135,6 +141,52 @@ export async function readAgentIssue(scope: Scope, id: string) {
   });
   if (!issue) throw new IssueApiError(404, "Issue not found.");
   return issue;
+}
+
+/** #586: list comments for an issue, resolving numeric issue references. Oldest first, cursor-paged. */
+export async function listAgentIssueComments(
+  scope: Scope,
+  id: string,
+  params: URLSearchParams,
+) {
+  const ref = parseIssueRef(id);
+  const whereIssue = ref && "number" in ref
+    ? { ...scope, number: ref.number, isDeleted: false }
+    : { ...scope, id, isDeleted: false };
+  const issue = await prisma.bug.findFirst({
+    where: whereIssue,
+    select: { id: true },
+  });
+  if (!issue) throw new IssueApiError(404, "Issue not found.");
+
+  const cursorRaw = params.get("after");
+  const cursor = decodeCursor(cursorRaw);
+  if (cursorRaw !== null && !cursor) throw new IssueApiError(400, "Invalid cursor.");
+  const limit = pageSize(params.get("limit"));
+
+  const where: Prisma.CommentWhereInput = {
+    bugId: issue.id,
+    deletedAt: null,
+    ...(cursor
+      ? {
+          OR: [
+            { createdAt: { gt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+          ],
+        }
+      : {}),
+  };
+
+  const rows = await prisma.comment.findMany({
+    where,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: limit + 1,
+    select: {
+      id: true, body: true, authorId: true, agentId: true, parentId: true,
+      createdAt: true, editedAt: true,
+    },
+  });
+  return toPage(rows, limit);
 }
 
 async function normalizeTenantMentions(db: Prisma.TransactionClient, tenantId: string, body: string) {
@@ -211,6 +263,16 @@ export async function createAgentIssue(agent: AgentContext, request: NextRequest
 export async function commentOnAgentIssue(agent: AgentContext, request: NextRequest, bugId: string) {
   const input = agentCommentSchema.parse(await issueJson(request));
   const scope = await issueProject(agent, request.nextUrl.searchParams, input.projectId);
+  // #586: resolve numeric issue references (e.g. "586") to the internal cuid id
+  const ref = parseIssueRef(bugId);
+  if (ref && "number" in ref) {
+    const resolved = await prisma.bug.findFirst({
+      where: { ...scope, number: ref.number, isDeleted: false },
+      select: { id: true },
+    });
+    if (!resolved) throw new IssueApiError(404, "Issue not found.");
+    bugId = resolved.id;
+  }
   let bug: { id: string; title: string; reporterId: string; assigneeId: string | null } | null = null;
   let parentAuthorId: string | null = null;
   const comment = await prisma.$transaction(async (tx) => {
