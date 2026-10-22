@@ -21,7 +21,7 @@ vi.mock("@/lib/agents/rate-budget", async (original) => ({
 }));
 import { GET as list, POST as create } from "@/app/api/v1/issues/route";
 import { GET as read } from "@/app/api/v1/issues/[id]/route";
-import { POST as comment } from "@/app/api/v1/issues/[id]/comments/route";
+import { GET as listComments, POST as comment } from "@/app/api/v1/issues/[id]/comments/route";
 import { POST as claim } from "@/app/api/v1/issues/[id]/claim/route";
 import { encodeCursor } from "./create-policy";
 import { PROJECT_ID_REQUIRED } from "./issues";
@@ -292,6 +292,39 @@ describe("agent comments", () => {
       id: { in: ["member", "outsider"] }, memberships: { some: { tenantId: "tenant-a" } },
     } }));
     expect(db.comment.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ body: "@[Real name](member) @Other" }) }));
+  });
+
+  it("resolves a numeric issue reference when posting a comment (#586)", async () => {
+    const numericContext = { params: Promise.resolve({ id: "586" }) };
+    const response = await comment(request("POST", { body: "A helpful comment" }), numericContext);
+    expect(response.status).toBe(201);
+    // Resolve number -> id, then find the issue inside the transaction
+    const findFirstCalls = db.bug.findFirst.mock.calls.map(([arg]) => arg);
+    expect(findFirstCalls.some((arg) => arg.where?.number === 586)).toBe(true);
+    expect(db.comment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ bugId: issue.id }) }),
+    );
+  });
+
+  it("resolves a numeric issue reference when listing comments (#586)", async () => {
+    db.comment.findMany.mockResolvedValue([{ id: "comment-a", body: "A helpful comment", createdAt: new Date() }]);
+    const numericContext = { params: Promise.resolve({ id: "586" }) };
+    const req = new NextRequest("http://localhost/api/v1/issues/586/comments?projectId=project-a", {
+      headers: { authorization: "Bearer ziki_test-key" },
+    });
+    const response = await listComments(req, numericContext);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.items).toHaveLength(1);
+    const findFirstCalls = db.bug.findFirst.mock.calls.map(([arg]) => arg);
+    expect(findFirstCalls.some((arg) => arg.where?.number === 586)).toBe(true);
+  });
+
+  it("returns 404 when a numeric issue reference matches no issue (#586)", async () => {
+    db.bug.findFirst.mockResolvedValueOnce(null);
+    const numericContext = { params: Promise.resolve({ id: "99999" }) };
+    const response = await comment(request("POST", { body: "A helpful comment" }), numericContext);
+    expect(response.status).toBe(404);
   });
 });
 
