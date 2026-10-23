@@ -89,6 +89,10 @@ const DELIVERY_STEPS = [
   },
 ] as const;
 
+/**
+ * Renders the webhook subscriptions management interface, including agent selection,
+ * endpoint URL configuration, delivery monitoring, and signing secret reveals (#648).
+ */
 export function WebhookManagement() {
   const toast = useToast();
   const confirm = useConfirm();

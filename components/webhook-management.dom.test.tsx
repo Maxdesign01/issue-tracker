@@ -32,7 +32,7 @@ afterEach(() => cleanup());
 
 describe("WebhookManagement", () => {
   it("shows a retryable error when the initial list action rejects", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     actions.list
       .mockRejectedValueOnce(new Error("database unavailable"))
       .mockResolvedValueOnce({ ok: true, subscriptions: [], agents: [] });
@@ -46,7 +46,7 @@ describe("WebhookManagement", () => {
   });
 
   it("keeps Add webhook disabled until an agent is picked and the URL is valid https://", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<WebhookManagement />);
 
     const add = await screen.findByRole("button", { name: "Add webhook" });
@@ -71,7 +71,7 @@ describe("WebhookManagement", () => {
   });
 
   it("reveals the signing secret once after a successful create", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     actions.create.mockResolvedValue({
       ok: true,
       secret: "whsec_test_secret_once",
@@ -161,7 +161,7 @@ describe("WebhookManagement", () => {
   });
 
   it("handles server action rejection without crashing or re-render loops (#648)", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     actions.create.mockResolvedValueOnce({
       ok: false,
       error: "SSRF blocked: local IP addresses are not permitted.",
@@ -182,7 +182,7 @@ describe("WebhookManagement", () => {
   });
 
   it("clears inline errors on successful resubmission (#648)", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     actions.create
       .mockResolvedValueOnce({
         ok: false,
