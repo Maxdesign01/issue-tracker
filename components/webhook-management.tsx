@@ -156,9 +156,16 @@ export function WebhookManagement() {
   const createError = createResult && !createResult.ok ? createResult : null;
 
   const createFieldErrors = useFieldErrors("create-webhook-form", createFormRef);
-  if (createError) {
-    createFieldErrors.show(createError);
-  }
+  const { show: showCreateFieldErrors, clear: clearCreateFieldErrors } = createFieldErrors;
+
+  useEffect(() => {
+    if (!createResult) return;
+    if (!createResult.ok) {
+      showCreateFieldErrors(createResult);
+    } else {
+      clearCreateFieldErrors();
+    }
+  }, [createResult, showCreateFieldErrors, clearCreateFieldErrors]);
 
   async function copyCreatedSecret() {
     const ok = await copyText(createdSecret);
