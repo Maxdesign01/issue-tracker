@@ -31,10 +31,14 @@ export function isPublicPath(
     pathWithoutBase === "/" ||
     pathWithoutBase === "" ||
     pathWithoutBase === "/llms.txt" ||
+    // #631: the public API docs are linked from the marketing homepage, so
+    // guests must reach them without a session. The page itself holds no
+    // workspace data — it lives outside the authenticated `(app)` group.
+    pathWithoutBase === "/docs" ||
+    pathWithoutBase.startsWith("/docs/") ||
     isAuthPage ||
     isPasswordResetPage ||
     isIssuePreview ||
-    pathWithoutBase === "/" ||
     pathWithoutBase.startsWith("/session-expired") ||
     // Shareable invite links (#444). Guests must see the organization and
     // sign in with Google before the link is used; the page itself never

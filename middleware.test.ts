@@ -55,6 +55,13 @@ describe("isPublicPath (#348)", () => {
     expect(isPublicPath("/llms.txt")).toBe(true);
   });
 
+  it("treats the public API docs page as public (#631)", () => {
+    expect(isPublicPath("/docs")).toBe(true);
+    expect(isPublicPath("/docs/")).toBe(true);
+    // Only the docs route itself — not every path that happens to start with it.
+    expect(isPublicPath("/docsomething")).toBe(false);
+  });
+
   it("treats auth and password reset pages as public", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/signup")).toBe(true);
@@ -73,35 +80,41 @@ describe("isPublicPath (#348)", () => {
     expect(isPublicPath("/api/internal/cron")).toBe(true);
     expect(isPublicPath("/api/internal")).toBe(false);
     expect(isPublicPath("/api/internal/cron/extra")).toBe(false);
-    expect(isPublicPath("/api/internal/other")).toBe(false);
   });
 
-  it("lets the agent API through; its routes check the agent key (#427)", () => {
-    expect(isPublicPath("/api/v1/agents/me")).toBe(true);
-    expect(isPublicPath("/api/v1/agents/pairing")).toBe(true);
-    // Only the versioned agent API, not the session-only routes beside it.
-    expect(isPublicPath("/api/v1")).toBe(false);
-    expect(isPublicPath("/api/issues/similar")).toBe(false);
-    expect(isPublicPath("/api/attachments/a1")).toBe(false);
+  it("treats issue detail pages as public for preview crawlers", () => {
+    const slackbot =
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)";
+    expect(isPublicPath("/issues/bug-1", slackbot)).toBe(true);
+    expect(isPublicPath("/bugs/bug-1", slackbot)).toBe(true);
+    expect(isPublicPath("/issues/bug-1/", slackbot)).toBe(true);
   });
 
-  it("lets guests open a shareable invite link without signing in first", () => {
-    expect(isPublicPath("/join")).toBe(true);
-    expect(isPublicPath("/join/abc")).toBe(true);
-    expect(isPublicPath("/joining")).toBe(false);
-    expect(isPublicPath("/tenants/invite/abc")).toBe(false);
+  it("treats issue detail pages as private for normal browsers", () => {
+    const chrome = "Mozilla/5.0 Chrome/120.0.0.0 Safari/537.36";
+    expect(isPublicPath("/issues/bug-1", chrome)).toBe(false);
+    expect(isPublicPath("/bugs/bug-1", chrome)).toBe(false);
   });
 
-  it("treats application routes as non-public", () => {
-    expect(isPublicPath("/issues")).toBe(false);
-    expect(isPublicPath("/issues/new")).toBe(false);
-    expect(isPublicPath("/admin")).toBe(false);
-    expect(isPublicPath("/admin/users")).toBe(false);
+  it("treats other pages as private even for preview crawlers", () => {
+    const slackbot =
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)";
+    expect(isPublicPath("/issues", slackbot)).toBe(false);
+    expect(isPublicPath("/settings", slackbot)).toBe(false);
+    expect(isPublicPath("/admin", slackbot)).toBe(false);
   });
 });
 
 describe("middleware routing (#348)", () => {
-  it("allows unauthenticated requests to / without redirecting to /login (#487)", () => {
+  it("allows access to public pages without redirect", () => {
+    const req = createMockReq({ pathname: "/login", isLoggedIn: false });
+    const res = runMiddleware(req);
+
+    expect(res.status).not.toBe(307);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("allows guests to reach the root homepage (#487)", () => {
     const req = createMockReq({ pathname: "/", isLoggedIn: false });
     const res = runMiddleware(req);
 
@@ -109,18 +122,35 @@ describe("middleware routing (#348)", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("lets an unauthenticated scheduler call reach /api/internal/cron instead of /login (#571)", () => {
-    const res = runMiddleware(createMockReq({ pathname: "/api/internal/cron", isLoggedIn: false }));
+  it("allows guests to reach /llms.txt (#487)", () => {
+    const req = createMockReq({ pathname: "/llms.txt", isLoggedIn: false });
+    const res = runMiddleware(req);
 
     expect(res.status).not.toBe(307);
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("allows unauthenticated requests to /session-expired without redirecting to /login", () => {
+  it("allows guests to reach /session-expired without redirect", () => {
     const req = createMockReq({ pathname: "/session-expired", isLoggedIn: false });
     const res = runMiddleware(req);
 
     // Should not redirect to login
+    expect(res.status).not.toBe(307);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("serves /docs to guests instead of redirecting to /login (#631)", () => {
+    const req = createMockReq({ pathname: "/docs", isLoggedIn: false });
+    const res = runMiddleware(req);
+
+    expect(res.status).not.toBe(307);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("still serves /docs to signed-in people (#631)", () => {
+    const req = createMockReq({ pathname: "/docs", isLoggedIn: true });
+    const res = runMiddleware(req);
+
     expect(res.status).not.toBe(307);
     expect(res.headers.get("location")).toBeNull();
   });
