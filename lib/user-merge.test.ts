@@ -5,7 +5,7 @@ describe("mergeUserAccounts (#651)", () => {
   it("throws if source or target user is missing or identical", async () => {
     const mockDb = {
       user: { findUnique: vi.fn() },
-    } as any;
+    } as unknown as Parameters<typeof mergeUserAccounts>[0];
 
     await expect(
       mergeUserAccounts(mockDb, { sourceUserId: "u1", targetUserId: "u1" }),
@@ -117,8 +117,8 @@ describe("mergeUserAccounts (#651)", () => {
         update: vi.fn(),
         delete: vi.fn(),
       },
-      $transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(tx)),
-    } as any;
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as Parameters<typeof mergeUserAccounts>[0];
 
     const result = await mergeUserAccounts(tx, {
       sourceUserId: "source-1",

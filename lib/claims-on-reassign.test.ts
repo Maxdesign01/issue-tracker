@@ -12,7 +12,7 @@ describe("releaseClaimsOnReassign (#651)", () => {
     const tx = {
       issueClaim: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
       bug: { updateMany: vi.fn() },
-    } as any;
+    } as unknown as Parameters<typeof releaseClaimsOnReassign>[0];
 
     const result = await releaseClaimsOnReassign(tx, {
       bugId: "bug-1",
@@ -39,7 +39,7 @@ describe("releaseClaimsOnReassign (#651)", () => {
       bug: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    } as any;
+    } as unknown as Parameters<typeof releaseClaimsOnReassign>[0];
 
     const result = await releaseClaimsOnReassign(tx, {
       bugId: "bug-1",
@@ -87,7 +87,7 @@ describe("releaseClaimsOnReassign (#651)", () => {
       bug: {
         updateMany: vi.fn(),
       },
-    } as any;
+    } as unknown as Parameters<typeof releaseClaimsOnReassign>[0];
 
     const result = await releaseClaimsOnReassign(tx, {
       bugId: "bug-1",
