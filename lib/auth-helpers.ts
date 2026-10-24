@@ -44,7 +44,7 @@ export async function requireUser(): Promise<SessionAppUser> {
   const resolved = await resolveSessionUserId();
   let userId: string;
   if ("error" in resolved) {
-    const email = session.user.email?.toLowerCase();
+    const email = session.user.email?.trim().toLowerCase();
     // A session with an email and no matching row was saved under Google's subject, not User.id.
     if (!email || isPasswordAuthEnabled()) {
       redirect(SESSION_EXPIRED_PATH);

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isSuperAdminEmail } from "@/lib/super-admin";
@@ -6,6 +6,10 @@ import { logger } from "@/lib/logger";
 import { clearTwoFactorAfterPasswordRemoved } from "@/lib/two-factor";
 
 type Db = typeof prisma;
+
+function generateCuidLikeId(): string {
+  return "c" + Date.now().toString(36) + randomBytes(8).toString("hex").slice(0, 16);
+}
 
 /**
  * Runs a user upsert. When it removes an unproven password, any two-factor
@@ -45,7 +49,7 @@ export async function upsertGoogleUser(input: {
   /** Google's own claim about this address (`profile.email_verified`). */
   emailVerified?: boolean;
 }): Promise<GoogleAccount> {
-  const email = input.email.toLowerCase();
+  const email = input.email.trim().toLowerCase();
   const name = input.name?.trim() || email.split("@")[0] || "User";
   const image = input.image || undefined;
   const role: Role = isSuperAdminEmail(email) ? "super_admin" : "user";
@@ -56,7 +60,14 @@ export async function upsertGoogleUser(input: {
   let neutralizePassword = false;
   let existing: { passwordHash: string | null; emailVerified: Date | null } | null | undefined;
   try {
-    existing = await prisma.user.findUnique({
+    existing =
+      (typeof prisma.user.findFirst === "function"
+        ? await prisma.user.findFirst({
+            where: { email: { equals: email, mode: "insensitive" } },
+            select: { passwordHash: true, emailVerified: true },
+          })
+        : null) ??
+      await prisma.user.findUnique({
       where: { email },
       select: { passwordHash: true, emailVerified: true },
     });
@@ -124,7 +135,7 @@ export async function upsertGoogleUser(input: {
     );
   }
 
-  const id = randomUUID();
+  const id = generateCuidLikeId();
   try {
     await prisma.$executeRaw`
       INSERT INTO "User" ("id", "name", "email", "createdAt")
@@ -140,7 +151,14 @@ export async function upsertGoogleUser(input: {
     `;
   }
 
-  const saved = await prisma.user.findUnique({
+  const saved =
+    (typeof prisma.user.findFirst === "function"
+      ? await prisma.user.findFirst({
+          where: { email: { equals: email, mode: "insensitive" } },
+          select: { id: true, name: true, sessionVersion: true },
+        })
+      : null) ??
+    await prisma.user.findUnique({
     where: { email },
     select: { id: true, name: true, sessionVersion: true },
   });

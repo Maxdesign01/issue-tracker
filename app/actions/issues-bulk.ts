@@ -23,6 +23,7 @@ import { notifyLater } from "@/lib/notify";
 import type { NotificationEvent } from "@/lib/notifications";
 import type { Severity, Status } from "@prisma/client";
 import { publish } from "@/lib/agent-api/events";
+import { releaseClaimsOnReassign } from "@/lib/claims-on-reassign";
 import { issueChangePayload, publishWebEvent } from "@/lib/agent-api/web-events";
 
 export type BulkResult = {
@@ -205,6 +206,17 @@ export async function bulkUpdateBugsAction(
         if (!changedIds.includes(bug.id)) continue;
         if (change.assigneeId && change.assigneeId !== bug.assigneeId) {
           await ensureWatching(tx, bug.id, [change.assigneeId]);
+        }
+        if (change.assigneeId !== undefined && change.assigneeId !== bug.assigneeId) {
+          const bugTenantId = bug.tenantId ?? tenantId;
+          if (bugTenantId) {
+            await releaseClaimsOnReassign(tx, {
+              bugId: bug.id,
+              tenantId: bugTenantId,
+              oldAssigneeId: bug.assigneeId,
+              newAssigneeId: change.assigneeId,
+            });
+          }
         }
         const target = solverAwardForBulkChange(bug, change);
         if (target) await awardSolver(tx, target);

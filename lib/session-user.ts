@@ -38,7 +38,7 @@ export async function resolveSessionUserId(): Promise<
 > {
   const session = await auth();
   const sessionId = session?.user?.id;
-  const email = session?.user?.email?.toLowerCase();
+  const email = session?.user?.email?.trim().toLowerCase();
   const sessionVersion = session?.user?.sessionVersion;
 
   if (!sessionId && !email) {
@@ -64,10 +64,16 @@ export async function resolveSessionUserId(): Promise<
 
   if (email) {
     try {
-      const byEmail = await prisma.user.findUnique({
+      let byEmail = await prisma.user.findUnique({
         where: { email },
         select: { id: true, sessionVersion: true },
       });
+      if (!byEmail && typeof prisma.user.findFirst === "function") {
+        byEmail = await prisma.user.findFirst({
+          where: { email: { equals: email, mode: "insensitive" } },
+          select: { id: true, sessionVersion: true },
+        });
+      }
       if (byEmail) {
         if (!sessionVersionAllowsSignIn(sessionVersion, byEmail.sessionVersion)) {
           return { error: SESSION_EXPIRED_MESSAGE };

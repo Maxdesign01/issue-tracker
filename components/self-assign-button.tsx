@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 type SelfAssignButtonProps = {
   bugId: string;
   isAssignedToMe: boolean;
+  canAdminUnassign?: boolean;
   variant?: "primary" | "secondary" | "ghost";
   size?: "xs" | "sm" | "default";
   className?: string;
@@ -34,6 +35,7 @@ function AlertIcon({ className = "h-3.5 w-3.5 shrink-0" }: { className?: string 
 export function SelfAssignButton({
   bugId,
   isAssignedToMe,
+  canAdminUnassign = false,
   variant = "secondary",
   size = "sm",
   className = "",
@@ -42,6 +44,7 @@ export function SelfAssignButton({
   const [error, setError] = useState<string | null>(null);
   const errorId = `assign-error-${bugId}`;
   const toast = useToast();
+  const isUnassign = isAssignedToMe || canAdminUnassign;
 
   const handleToggle = (assign: boolean) => {
     setError(null);
@@ -64,19 +67,25 @@ export function SelfAssignButton({
         <button
           type="button"
           disabled={pending}
-          onClick={() => handleToggle(!isAssignedToMe)}
+          onClick={() => handleToggle(!isUnassign)}
           className={`rounded text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-blue-strong focus-visible:ring-offset-2 disabled:opacity-50 ${
-            isAssignedToMe
+            isUnassign
               ? "text-zk-muted hover:text-zk-bad-fg hover:underline"
               : "text-zk-accent hover:text-zk-accent hover:underline"
           } ${className}`}
-          title={isAssignedToMe ? "Unassign yourself from this issue" : "Assign this issue to yourself"}
+          title={
+            isAssignedToMe
+              ? "Unassign yourself from this issue"
+              : isUnassign
+                ? "Unassign this issue"
+                : "Assign this issue to yourself"
+          }
         >
           {pending
-            ? isAssignedToMe
+            ? isUnassign
               ? "Unassigning…"
               : "Assigning…"
-            : isAssignedToMe
+            : isUnassign
               ? "Unassign"
               : "Assign to me"}
         </button>
@@ -93,22 +102,28 @@ export function SelfAssignButton({
     <div className="inline-flex flex-col items-start gap-1">
       <Button
         type="button"
-        variant={isAssignedToMe ? "secondary" : variant}
+        variant={isUnassign ? "secondary" : variant}
         disabled={pending}
-        onClick={() => handleToggle(!isAssignedToMe)}
+        onClick={() => handleToggle(!isUnassign)}
         aria-describedby={error ? errorId : undefined}
         className={`${size === "sm" ? "px-3 py-1.5 text-xs" : ""} ${className}`}
         title={
           isAssignedToMe
             ? "Unassign yourself from this issue"
-            : "Assign this issue to yourself"
+            : isUnassign
+              ? "Unassign this issue"
+              : "Assign this issue to yourself"
         }
       >
         {pending ? (
-          isAssignedToMe ? "Unassigning…" : "Assigning…"
+          isUnassign ? "Unassigning…" : "Assigning…"
         ) : isAssignedToMe ? (
           <>
             <span aria-hidden="true">✓</span> Assigned to you · Unassign
+          </>
+        ) : isUnassign ? (
+          <>
+            <span aria-hidden="true">✕</span> Unassign
           </>
         ) : (
           <>

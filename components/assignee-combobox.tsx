@@ -45,7 +45,7 @@ export function AssigneeCombobox({
   const labelFor = (personId: string) => {
     if (!personId) return UNASSIGNED.label;
     const person = people.find((p) => p.id === personId);
-    return person ? formatUserLabel(person.name, person.role) : "";
+    return person ? formatUserLabel(person.name, person.role) : "Unknown assignee";
   };
 
   const [query, setQuery] = useState("");

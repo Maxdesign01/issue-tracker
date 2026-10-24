@@ -59,6 +59,7 @@ import {
   TICKET_BOOST_ERRORS,
 } from "@/lib/ticket-boosting";
 import { canAssignTicket, TICKET_ASSIGN_ERRORS } from "@/lib/ticket-assignment";
+import { releaseClaimsOnReassign } from "@/lib/claims-on-reassign";
 import { canChangeTicketStatus, TICKET_TRIAGE_ERRORS } from "@/lib/ticket-triage";
 import {
   canEditTicket,
@@ -830,6 +831,17 @@ export async function updateBugAction(
             payload: { claimId: claim.id, issueId: bugId, beneficiaryUserId: claim.beneficiaryUserId, reason: data.status },
           });
         }
+      }
+      if (
+        data.assigneeId !== undefined &&
+        data.assigneeId !== existing.assigneeId
+      ) {
+        await releaseClaimsOnReassign(tx, {
+          bugId,
+          tenantId: existing.tenantId,
+          oldAssigneeId: existing.assigneeId,
+          newAssigneeId: data.assigneeId,
+        });
       }
       if (data.assigneeId) {
         // The new assignee starts watching (#216).
@@ -1889,9 +1901,11 @@ export async function selfAssignBugAction(
     return { error: TICKET_ASSIGN_ERRORS.notFound };
   }
 
+  const access = await currentTenantAccess(userId, user.role);
+  const admin = access.admin;
   const targetAssigneeId = assign ? userId : null;
 
-  if (assign && existing.assigneeId !== userId) {
+  if (assign && !admin && existing.assigneeId !== userId) {
     return { error: TICKET_ASSIGN_ERRORS.needsAgentClaim };
   }
 
@@ -1899,7 +1913,7 @@ export async function selfAssignBugAction(
     !canAssignTicket({
       actorId: userId,
       actorRole: user.role,
-      membershipRole: (await currentTenantAccess(userId, user.role)).membershipRole,
+      membershipRole: access.membershipRole,
       currentAssigneeId: existing.assigneeId,
       targetAssigneeId,
       voteCount: existing.voteCount,
@@ -1930,6 +1944,16 @@ export async function selfAssignBugAction(
       });
       // Taking an issue means watching it (#216).
       await ensureWatching(tx, bugId, [targetAssigneeId]);
+
+      const tenantId = await currentTenantIdFor(userId);
+      if (tenantId) {
+        await releaseClaimsOnReassign(tx, {
+          bugId,
+          tenantId,
+          oldAssigneeId: existing.assigneeId,
+          newAssigneeId: targetAssigneeId,
+        });
+      }
 
       await tx.bugActivity.create({
         data: {

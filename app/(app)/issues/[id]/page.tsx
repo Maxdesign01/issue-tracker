@@ -579,6 +579,10 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
         }),
       )
     : [];
+  const triageUsers =
+    bug.assignee && !users.some((u) => u.id === bug.assignee?.id)
+      ? [...users, { id: bug.assignee.id, name: bug.assignee.name, role: "user" as const, image: null }]
+      : users;
   const commentMentionUsers = [
     ...users,
     ...mentionAgents.map((agent) => ({
@@ -611,16 +615,18 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
       membershipRole: access.membershipRole,
       reporterId: bug.reporterId,
     }) && !bug.isDeleted;
+  const canAdminUnassign = Boolean(access.admin && bug.assigneeId && !isAssignee);
   const canSelfAssign =
     !bug.isDeleted &&
-    canAssignTicket({
+    (canAdminUnassign ||
+      canAssignTicket({
       actorId: userId,
       actorRole: user.role,
       membershipRole: access.membershipRole,
       currentAssigneeId: bug.assigneeId,
       targetAssigneeId: isAssignee ? null : userId,
       voteCount: bug.voteCount,
-    });
+    }));
   const userVote =
     Array.isArray(bug.votes) && bug.votes.length > 0
       ? (bug.votes[0].value ?? 1)
@@ -669,6 +675,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
         <SelfAssignButton
           bugId={bug.id}
           isAssignedToMe={isAssignee}
+          canAdminUnassign={canAdminUnassign}
           size="sm"
         />
       ) : null}
@@ -1006,7 +1013,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
               assigneeId={bug.assigneeId}
               categoryId={bug.categoryId}
               areaId={bug.areaId}
-              users={users}
+              users={triageUsers}
               categories={withCurrentOption(categories, bug.category)}
               areas={areas}
               types={withCurrentOption(types, bug.type)}
@@ -1154,6 +1161,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   <SelfAssignButton
                     bugId={bug.id}
                     isAssignedToMe={isAssignee}
+                    canAdminUnassign={canAdminUnassign}
                     variant="ghost"
                     size="xs"
                   />
