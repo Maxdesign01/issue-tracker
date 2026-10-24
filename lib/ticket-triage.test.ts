@@ -72,4 +72,101 @@ describe("canChangeTicketStatus", () => {
       }),
     ).toBe(false);
   });
+
+  // #649: Reporter closing their own unconfirmed, unassigned issue
+  describe("reporter closing unconfirmed, unassigned issue (#649)", () => {
+    it("allows the reporter to close an unassigned, unconfirmed issue", () => {
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "closed",
+        }),
+      ).toBe(true);
+    });
+
+    it("denies the reporter from setting any status other than closed", () => {
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "resolved",
+        }),
+      ).toBe(false);
+
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "in_progress",
+        }),
+      ).toBe(false);
+
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "open",
+        }),
+      ).toBe(false);
+    });
+
+    it("denies the reporter if the issue is already assigned to someone", () => {
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: "assignee-1",
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "closed",
+        }),
+      ).toBe(false);
+    });
+
+    it("denies the reporter if the issue is already confirmed", () => {
+      expect(
+        canChangeTicketStatus({
+          actorId: "reporter-1",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: true,
+          targetStatus: "closed",
+        }),
+      ).toBe(false);
+    });
+
+    it("denies a non-reporter on an unassigned, unconfirmed issue", () => {
+      expect(
+        canChangeTicketStatus({
+          actorId: "random-user",
+          actorRole: "user",
+          membershipRole: "member",
+          currentAssigneeId: null,
+          reporterId: "reporter-1",
+          isConfirmed: false,
+          targetStatus: "closed",
+        }),
+      ).toBe(false);
+    });
+  });
 });

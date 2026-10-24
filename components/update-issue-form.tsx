@@ -50,6 +50,7 @@ export function UpdateIssueForm({
   types = [],
   milestones = [],
   canEditTriage = true,
+  allowedStatuses,
 }: {
   bugId: string;
   status: Status;
@@ -68,6 +69,8 @@ export function UpdateIssueForm({
   milestones?: MilestoneOption[];
   /** Admins can edit severity/type/category/assignee; assignees only change status. */
   canEditTriage?: boolean;
+  /** #649: Constrain selectable statuses (e.g. reporters may only close an unconfirmed issue). */
+  allowedStatuses?: readonly Status[];
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -181,7 +184,7 @@ export function UpdateIssueForm({
             onChange={(event) => set("status", event.target.value)}
             className={selectClass}
           >
-            {statuses.map((value) => (
+            {(allowedStatuses ?? statuses).map((value) => (
               <option key={value} value={value}>
                 {statusLabel[value]}
               </option>

@@ -603,7 +603,10 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
     }
   }
   const isAssignee = !!userId && bug.assigneeId === userId;
-  const canUpdateStatus = canTriage || isAssignee;
+  const isReporter = !!userId && bug.reporterId === userId;
+  const isUnconfirmed = intakeStage === "reported" || intakeStage === null;
+  const canReporterClose = isReporter && !bug.assigneeId && isUnconfirmed;
+  const canUpdateStatus = canTriage || isAssignee || canReporterClose;
   const canEdit =
     canEditTicket({
       actorId: userId,
@@ -1017,6 +1020,7 @@ export default async function BugDetailPage({ params, searchParams }: BugPagePro
                   : milestoneOptions
               }
               canEditTriage={canTriage}
+              allowedStatuses={canReporterClose && !canTriage && !isAssignee ? ["open", "closed"] : undefined}
             />
           ) : null}
 

@@ -586,3 +586,74 @@ async function linkAgentAttachments(
     await linkAttachments(tx, { ids: referenced, uploaderId: agent.ownerId, bugId: input.bugId, commentId: input.commentId ?? null });
   }
 }
+
+/**
+ * #649: Allows the reporter (or their agent) to close/withdraw an unconfirmed,
+ * unassigned issue.
+ */
+export async function closeAgentIssue(
+  agent: AgentContext,
+  scope: Scope,
+  id: string,
+  note?: string,
+) {
+  const ref = parseIssueRef(id);
+  const bug = await prisma.bug.findFirst({
+    where: { ...scope, ...(ref.kind === "number" ? { number: ref.number } : { id: ref.id }), isDeleted: false },
+    select: {
+      id: true,
+      projectId: true,
+      tenantId: true,
+      status: true,
+      assigneeId: true,
+      reporterId: true,
+      createdByAgentId: true,
+      beneficiaryUserId: true,
+    },
+  });
+  if (!bug) throw new IssueApiError(404, "Issue not found.");
+
+  const isReporter =
+    bug.createdByAgentId === agent.agentId ||
+    bug.reporterId === agent.ownerId ||
+    bug.beneficiaryUserId === agent.ownerId;
+
+  if (!isReporter) {
+    throw new IssueApiError(403, "forbidden", { message: "Only the reporter can close an unconfirmed issue." });
+  }
+  if (bug.assigneeId) {
+    throw new IssueApiError(400, "bad_request", { message: "Cannot close an assigned issue." });
+  }
+  const confirmed = await isConfirmed(bug.id);
+  if (confirmed) {
+    throw new IssueApiError(400, "bad_request", { message: "Cannot close a confirmed issue." });
+  }
+  if (bug.status === "closed") {
+    return readAgentIssue(scope, bug.id);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.bug.update({
+      where: { id: bug.id },
+      data: { status: "closed" },
+    });
+    const summary = `changed status from ${bug.status} to closed`;
+    await tx.bugActivity.create({
+      data: {
+        bugId: bug.id,
+        actorId: agent.ownerId,
+        type: "status_changed",
+        summary,
+        metadata: {
+          field: "status",
+          from: bug.status,
+          to: "closed",
+          agentId: agent.agentId,
+          ...(note ? { note } : {}),
+        },
+      },
+    });
+  });
+
+  return readAgentIssue(scope, bug.id);
+}

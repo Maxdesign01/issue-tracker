@@ -589,4 +589,57 @@ describe("agents hear about triage in the web app (#600, #656)", () => {
       }),
     );
   });
+
+  describe("reporter closing unconfirmed, unassigned issue (#649)", () => {
+    it("allows the reporter to close their own unconfirmed, unassigned issue", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(null, { reporterId: ME }));
+
+      const result = await updateBugAction("bug1", form({ status: "closed" }));
+      expect(result).toEqual({ ok: true });
+      expect(written).toEqual({ status: "closed" });
+      expect(activities).toContain("status_changed");
+    });
+
+    it("allows the reporter to close via closeBugAction with an optional resolution note", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(null, { reporterId: ME }));
+
+      const result = await closeBugAction("bug1", "Duplicate idea");
+      expect(result).toEqual({ ok: true });
+      expect(written).toEqual({ status: "closed" });
+      expect(activities).toContain("status_changed");
+    });
+
+    it("denies the reporter from changing status to resolved or in_progress", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(null, { reporterId: ME }));
+
+      const resolvedResult = await updateBugAction("bug1", form({ status: "resolved" }));
+      expect(resolvedResult).toEqual({ error: TICKET_TRIAGE_ERRORS.statusUnauthorized });
+      expect(written).toBeNull();
+
+      const inProgressResult = await updateBugAction("bug1", form({ status: "in_progress" }));
+      expect(inProgressResult).toEqual({ error: TICKET_TRIAGE_ERRORS.statusUnauthorized });
+      expect(written).toBeNull();
+    });
+
+    it("denies a user who is not the reporter from closing an unassigned issue", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(null, { reporterId: OTHER }));
+
+      const result = await updateBugAction("bug1", form({ status: "closed" }));
+      expect(result).toEqual({ error: TICKET_TRIAGE_ERRORS.statusUnauthorized });
+      expect(written).toBeNull();
+    });
+
+    it("denies the reporter if the issue is already assigned", async () => {
+      mockUser.mockResolvedValue({ id: ME, name: "Me", role: "user" });
+      db.bug.findUnique.mockResolvedValue(issue(OTHER, { reporterId: ME }));
+
+      const result = await updateBugAction("bug1", form({ status: "closed" }));
+      expect(result).toEqual({ error: TICKET_TRIAGE_ERRORS.statusUnauthorized });
+      expect(written).toBeNull();
+    });
+  });
 });

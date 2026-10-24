@@ -24,7 +24,7 @@ vi.mock("@/lib/agents/rate-budget", async (original) => ({
   ...await original<typeof import("@/lib/agents/rate-budget")>(), consumeAgentBudget: budget,
 }));
 import { GET as list, POST as create } from "@/app/api/v1/issues/route";
-import { GET as read } from "@/app/api/v1/issues/[id]/route";
+import { GET as read, PATCH as patch } from "@/app/api/v1/issues/[id]/route";
 import { POST as comment, GET as comments } from "@/app/api/v1/issues/[id]/comments/route";
 import { POST as claim } from "@/app/api/v1/issues/[id]/claim/route";
 import { encodeCursor, hashCreateRequest } from "./create-policy";
@@ -896,5 +896,77 @@ describe("issue read confirmation", () => {
   it("selects the upvote count for each listed issue (#463)", async () => {
     await list(request());
     expect(db.bug.findMany.mock.calls.at(-1)?.[0]?.select.voteCount).toBe(true);
+  });
+
+  describe("PATCH /api/v1/issues/[id] (#649)", () => {
+    it("allows the reporter agent to close an unconfirmed, unassigned issue", async () => {
+      db.bug.findFirst.mockResolvedValue({
+        id: "issue-a",
+        projectId: "project-a",
+        tenantId: "tenant-a",
+        status: "open",
+        assigneeId: null,
+        reporterId: "owner-a",
+        createdByAgentId: "agent-a",
+        beneficiaryUserId: "owner-a",
+        comments: [],
+        attachments: [],
+        validations: [],
+        _count: { comments: 0 },
+        voteCount: 0,
+      });
+      db.issueValidation.findMany.mockResolvedValue([]);
+      db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db));
+
+      const res = await patch(request("PATCH", { status: "closed" }), context);
+      expect(res.status).toBe(200);
+      expect(db.bug.update).toHaveBeenCalledWith({
+        where: { id: "issue-a" },
+        data: { status: "closed" },
+      });
+      expect(db.bugActivity.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            bugId: "issue-a",
+            type: "status_changed",
+            metadata: expect.objectContaining({ from: "open", to: "closed" }),
+          }),
+        }),
+      );
+    });
+
+    it("denies an agent that does not own or report the issue", async () => {
+      db.bug.findFirst.mockResolvedValue({
+        id: "issue-a",
+        projectId: "project-a",
+        tenantId: "tenant-a",
+        status: "open",
+        assigneeId: null,
+        reporterId: "someone-else",
+        createdByAgentId: "other-agent",
+        beneficiaryUserId: "someone-else",
+      });
+
+      const res = await patch(request("PATCH", { status: "closed" }), context);
+      expect(res.status).toBe(403);
+      expect(db.bug.update).not.toHaveBeenCalled();
+    });
+
+    it("denies closing when the issue is already assigned", async () => {
+      db.bug.findFirst.mockResolvedValue({
+        id: "issue-a",
+        projectId: "project-a",
+        tenantId: "tenant-a",
+        status: "open",
+        assigneeId: "assignee-1",
+        reporterId: "owner-a",
+        createdByAgentId: "agent-a",
+        beneficiaryUserId: "owner-a",
+      });
+
+      const res = await patch(request("PATCH", { status: "closed" }), context);
+      expect(res.status).toBe(400);
+      expect(db.bug.update).not.toHaveBeenCalled();
+    });
   });
 });

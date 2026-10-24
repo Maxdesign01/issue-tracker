@@ -475,6 +475,15 @@ export async function updateBugAction(
   // request could also close/reopen the issue, letting any user close any
   // unassigned issue. Checked before schema parsing so the error is explicit.
   const requestedStatus = formData.get("status") || undefined;
+  const isReporter = Boolean(userId && existing.reporterId === userId);
+  const isUnassigned = !existing.assigneeId;
+  const confirmed = await isConfirmed(existing.id);
+  const isReporterClosing =
+    isReporter &&
+    isUnassigned &&
+    !confirmed &&
+    requestedStatus === "closed";
+
   if (
     requestedStatus &&
     !canChangeTicketStatus({
@@ -482,12 +491,15 @@ export async function updateBugAction(
       actorRole: user.role,
       membershipRole: access.membershipRole,
       currentAssigneeId: existing.assigneeId,
+      reporterId: existing.reporterId,
+      isConfirmed: confirmed,
+      targetStatus: typeof requestedStatus === "string" ? requestedStatus : undefined,
     })
   ) {
     return { error: TICKET_TRIAGE_ERRORS.statusUnauthorized };
   }
 
-  if (!admin && !isAssignee && !isSelfAssigning) {
+  if (!admin && !isAssignee && !isSelfAssigning && !isReporterClosing) {
     return {
       error: "Only the assignee, or an owner or admin of this organization, can update this issue",
     };
@@ -547,9 +559,11 @@ export async function updateBugAction(
   // normal user who isn't the assignee yet must assign themselves first
   // (#218, #175). Someone an admin already assigned can move the status
   // from this page; that does not require an agent claim.
+  // #649: an unassigned, unconfirmed issue's reporter may close it.
   if (
     !admin &&
     !isAssignee &&
+    !isReporterClosing &&
     parsed.data.status &&
     parsed.data.status !== existing.status
   ) {

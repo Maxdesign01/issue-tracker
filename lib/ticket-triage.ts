@@ -12,6 +12,9 @@ export type CanChangeTicketStatusParams = {
   actorRole?: AppRole | null;
   membershipRole?: MembershipRole | null;
   currentAssigneeId?: string | null;
+  reporterId?: string | null;
+  isConfirmed?: boolean;
+  targetStatus?: string | null;
 };
 
 /**
@@ -24,14 +27,30 @@ export type CanChangeTicketStatusParams = {
  * assignee the issue has *now* - and never against the assignee the request is
  * trying to set. Otherwise a user could self-assign an unassigned issue and, in
  * the same request, close it.
+ *
+ * #649: An issue's reporter may also close their own issue, provided it is
+ * currently unassigned, not yet confirmed, and the requested status is "closed".
  */
 export function canChangeTicketStatus({
   actorId,
   actorRole,
   membershipRole,
   currentAssigneeId,
+  reporterId,
+  isConfirmed = false,
+  targetStatus,
 }: CanChangeTicketStatusParams): boolean {
   if (!actorId) return false;
   if (isOrganizationAdmin(membershipRole, actorRole)) return true;
-  return Boolean(currentAssigneeId && actorId === currentAssigneeId);
+  if (currentAssigneeId && actorId === currentAssigneeId) return true;
+  if (
+    reporterId &&
+    actorId === reporterId &&
+    !currentAssigneeId &&
+    !isConfirmed &&
+    targetStatus === "closed"
+  ) {
+    return true;
+  }
+  return false;
 }
