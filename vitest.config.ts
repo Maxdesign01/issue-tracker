@@ -1,6 +1,22 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
+/** Strips a leading `#!/usr/bin/env node` shebang from `.mjs` modules so
+ *  directly-executable CLI scripts can be imported by Vitest without a
+ *  SyntaxError (#671). The shebang is only meaningful at process entry. */
+function shebangStripPlugin() {
+  return {
+    name: "shebang-strip",
+    enforce: "pre",
+    transform(code: string, id: string) {
+      if (!id.endsWith(".mjs")) return null;
+      const shebangEnd = code.indexOf("\n");
+      if (shebangEnd === -1 || !code.startsWith("#!")) return null;
+      return code.slice(shebangEnd + 1);
+    },
+  } as const;
+}
+
 export default defineConfig({
   test: {
     // Node by default: most specs are pure logic or route handlers that need
@@ -32,4 +48,5 @@ export default defineConfig({
       "server-only": path.resolve(__dirname, "node_modules/server-only/empty.js"),
     },
   },
+  plugins: [shebangStripPlugin()],
 });
