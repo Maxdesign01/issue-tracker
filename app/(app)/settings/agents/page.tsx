@@ -101,6 +101,27 @@ export default async function AgentsSettingsPage() {
               },
             },
             areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
+            questions: {
+              where: { answeredAt: null },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                body: true,
+                bug: { select: { id: true, number: true, title: true } },
+              },
+            },
+            claims: {
+              where: { releasedAt: null, status: "active" },
+              orderBy: { claimedAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                claimedAt: true,
+                waitingOnOwnerSince: true,
+                bug: { select: { id: true, number: true, title: true, status: true } },
+              },
+            },
           },
         }),
         prisma.membership.findMany({
@@ -116,7 +137,13 @@ export default async function AgentsSettingsPage() {
                   where: { tenantId, revokedAt: null },
                   orderBy: { createdAt: "asc" },
                   select: {
-                    id: true, name: true, model: true, level: true, burst: true, burstUntil: true, defaultProjectId: true,
+                    id: true,
+                    name: true,
+                    model: true,
+                    level: true,
+                    burst: true,
+                    burstUntil: true,
+                    defaultProjectId: true,
                     areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
                   },
                 },
@@ -141,6 +168,48 @@ export default async function AgentsSettingsPage() {
     const lastUsedMs = agent.apiKeys
       .map((key) => (key.lastUsedAt ? key.lastUsedAt.getTime() : 0))
       .reduce((a, b) => Math.max(a, b), 0);
+
+    const unansweredQuestion = agent.questions[0] ?? null;
+    const activeClaim = agent.claims[0] ?? null;
+
+    let gardenState: ManageAgentItem["gardenState"] = "idle";
+    let gardenActivity = "Standing by in garden";
+    let activeTask: ManageAgentItem["activeTask"] = null;
+
+    if (agent.revokedAt) {
+      gardenState = "offline";
+      gardenActivity = "Decommissioned / offline";
+    } else if (unansweredQuestion) {
+      gardenState = "waiting";
+      gardenActivity = "Waiting on your plan review";
+      if (unansweredQuestion.bug) {
+        activeTask = {
+          issueId: unansweredQuestion.bug.id,
+          issueNumber: unansweredQuestion.bug.number,
+          issueTitle: unansweredQuestion.bug.title,
+        };
+      }
+    } else if (activeClaim) {
+      if (activeClaim.waitingOnOwnerSince) {
+        gardenState = "waiting";
+        gardenActivity = "Paused — awaiting owner guidance";
+      } else {
+        gardenState = "working";
+        gardenActivity = `Working on #${activeClaim.bug.number}`;
+      }
+      activeTask = {
+        issueId: activeClaim.bug.id,
+        issueNumber: activeClaim.bug.number,
+        issueTitle: activeClaim.bug.title,
+      };
+    } else if (lastUsedMs >= recentCutoff) {
+      gardenState = "idle";
+      gardenActivity = "Ready for dispatch";
+    } else {
+      gardenState = "idle";
+      gardenActivity = "Resting in garden";
+    }
+
     return {
       id: agent.id,
       name: agent.name,
@@ -153,6 +222,9 @@ export default async function AgentsSettingsPage() {
       personal: Boolean(agent.defaultProjectId),
       currentProjectId: agent.apiKeys.find((key) => key.project)?.project?.id ?? null,
       recent: lastUsedMs >= recentCutoff,
+      gardenState,
+      gardenActivity,
+      activeTask,
       apiKeys: agent.apiKeys.map((key) => ({
         id: key.id,
         prefix: key.prefix,

@@ -8,6 +8,7 @@ import { LocalTime } from "@/components/local-time";
 import { RelativeTime } from "@/components/relative-time";
 import { AgentControls } from "./agent-controls";
 import { AgentRowKey } from "./agent-row-key";
+import { AgentGardenView, type AgentGardenState } from "./agent-garden-view";
 import type { AgentProjectChoice } from "./create-agent-form";
 import {
   agentAvatarColor,
@@ -32,6 +33,13 @@ export type ManageAgentItem = {
   personal: boolean;
   currentProjectId: string | null;
   recent: boolean;
+  gardenState?: AgentGardenState;
+  gardenActivity?: string;
+  activeTask?: {
+    issueId?: string;
+    issueNumber?: number;
+    issueTitle?: string;
+  } | null;
   apiKeys: {
     id: string;
     prefix: string;
@@ -64,6 +72,7 @@ export function ManageAgentsList({
 }) {
   const [filter, setFilter] = useState<FilterId>("all");
   const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"garden" | "list">("garden");
 
   const covered = useMemo(() => {
     const set = new Set(agents.filter((a) => !a.revokedAt).map((a) => a.level));
@@ -152,26 +161,57 @@ export function ManageAgentsList({
             className="h-11 w-full rounded-full border border-zk-border bg-zk-surface px-4 text-sm text-zk-text placeholder:text-zk-muted focus:border-electric-blue focus:outline-none focus:ring-2 focus:ring-electric-blue/20"
           />
         </label>
-        <div role="tablist" aria-label="Filter by role" className="inline-flex flex-wrap gap-1 rounded-full bg-zk-seg p-1">
-          {tabs.map((tab) => {
-            const on = filter === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setFilter(tab.id)}
-                className={`min-h-[34px] rounded-full px-3.5 text-[13px] transition ${
-                  on
-                    ? "bg-zk-surface font-bold text-zk-text shadow-sm"
-                    : "font-medium text-zk-text2 hover:text-zk-text"
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Garden / List View Switcher */}
+          <div role="group" aria-label="View format" className="inline-flex rounded-full bg-zk-seg p-1">
+            <button
+              type="button"
+              aria-pressed={viewMode === "garden"}
+              onClick={() => setViewMode("garden")}
+              className={`min-h-[34px] rounded-full px-3 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === "garden"
+                  ? "bg-zk-surface text-zk-text shadow-xs"
+                  : "text-zk-text2 hover:text-zk-text"
+              }`}
+            >
+              <span aria-hidden="true">🌱</span> Garden
+            </button>
+            <button
+              type="button"
+              aria-pressed={viewMode === "list"}
+              onClick={() => setViewMode("list")}
+              className={`min-h-[34px] rounded-full px-3 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === "list"
+                  ? "bg-zk-surface text-zk-text shadow-xs"
+                  : "text-zk-text2 hover:text-zk-text"
+              }`}
+            >
+              <span aria-hidden="true">📋</span> List
+            </button>
+          </div>
+
+          {/* Role Filter Tabs */}
+          <div role="tablist" aria-label="Filter by role" className="inline-flex flex-wrap gap-1 rounded-full bg-zk-seg p-1">
+            {tabs.map((tab) => {
+              const on = filter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setFilter(tab.id)}
+                  className={`min-h-[34px] rounded-full px-3.5 text-[13px] transition cursor-pointer ${
+                    on
+                      ? "bg-zk-surface font-bold text-zk-text shadow-sm"
+                      : "font-medium text-zk-text2 hover:text-zk-text"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -179,6 +219,11 @@ export function ManageAgentsList({
         <p className={`${agentsMutedClass} ${agentsSurface} p-6`}>
           {agents.length === 0 ? "No agents yet." : "No agents with this role yet."}
         </p>
+      ) : viewMode === "garden" ? (
+        <AgentGardenView
+          agents={visible}
+          onOpenControls={() => setViewMode("list")}
+        />
       ) : (
         <ul className="space-y-3">
           {visible.map((agent) => {
