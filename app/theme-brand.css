@@ -18,3 +18,17 @@
   --color-teal-900: oklch(39.3% 0.095 152.535);
   --color-teal-950: oklch(26.6% 0.065 152.934);
 }
+
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-white: #fff;
+    --card: #0e1a33;
+  }
+}
+
+@media screen {
+  :root[data-theme="dark"] {
+    --color-white: #fff;
+    --card: #0e1a33;
+  }
+}
