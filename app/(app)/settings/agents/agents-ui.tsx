@@ -22,7 +22,7 @@ export const agentsInputClass =
 
 export const agentsLabelClass = "block text-sm font-semibold text-slate-900 dark:text-slate-100";
 
-export const agentsMutedClass = "text-sm text-slate-500 dark:text-slate-400";
+export const agentsMutedClass = "text-sm text-slate-600 dark:text-slate-300";
 
 export const agentsChipClass =
   "inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300";
