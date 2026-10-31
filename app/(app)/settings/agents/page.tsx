@@ -2,8 +2,6 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
-import { LocalTime } from "@/components/local-time";
-import { RelativeTime } from "@/components/relative-time";
 import {
   AGENT_LEVEL_DESCRIPTIONS,
   AGENT_LEVEL_LABELS,
@@ -21,7 +19,7 @@ import { materializeApprovedPairings } from "@/lib/agents/pairing";
 import { isAgentPlatformEnabled } from "@/lib/feature-flags";
 import { CreateAgentForm } from "./create-agent-form";
 import { AgentControls } from "./agent-controls";
-import { AgentRowKey } from "./agent-row-key";
+import { ManageAgentsList, type ManageAgentItem } from "./manage-agents-list";
 
 /** Decrypts a stored agent key for display; a missing or unreadable seal yields null so the row still renders. */
 function revealAgentKey(sealed: string | null): string | null {
@@ -104,6 +102,27 @@ export default async function AgentsSettingsPage() {
               },
             },
             areaPreferences: { select: { projectAreaId: true, projectArea: { select: { projectId: true } } } },
+            questions: {
+              where: { answeredAt: null },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                body: true,
+                bug: { select: { id: true, number: true, title: true } },
+              },
+            },
+            claims: {
+              where: { status: "active" },
+              orderBy: { claimedAt: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                claimedAt: true,
+                waitingOnOwnerSince: true,
+                bug: { select: { id: true, number: true, title: true, status: true } },
+              },
+            },
           },
         }),
         prisma.membership.findMany({
@@ -137,6 +156,78 @@ export default async function AgentsSettingsPage() {
 
   const ownLevels = settableLevels({ isOwner: true, isTenantAdmin: isAdmin });
   const adminLevels = settableLevels({ isOwner: false, isTenantAdmin: true });
+  const activeCount = mine.filter((agent) => !agent.revokedAt).length;
+  const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
+
+  const manageItems: ManageAgentItem[] = mine.map((agent) => {
+    const lastUsedMs = agent.apiKeys
+      .map((key) => (key.lastUsedAt ? key.lastUsedAt.getTime() : 0))
+      .reduce((a, b) => Math.max(a, b), 0);
+
+    const unansweredQuestion = agent.questions[0] ?? null;
+    const activeClaim = agent.claims[0] ?? null;
+
+    let gardenState: ManageAgentItem["gardenState"] = "idle";
+    let gardenActivity = "Standing by in garden";
+    let activeTask: ManageAgentItem["activeTask"] = null;
+
+    if (agent.revokedAt) {
+      gardenState = "offline";
+      gardenActivity = "Decommissioned / offline";
+    } else if (unansweredQuestion) {
+      gardenState = "waiting";
+      gardenActivity = "Waiting on your plan review";
+      if (unansweredQuestion.bug) {
+        activeTask = {
+          issueId: unansweredQuestion.bug.id,
+          issueNumber: unansweredQuestion.bug.number,
+          issueTitle: unansweredQuestion.bug.title,
+        };
+      }
+    } else if (activeClaim) {
+      if (activeClaim.waitingOnOwnerSince) {
+        gardenState = "waiting";
+        gardenActivity = "Paused — awaiting owner guidance";
+      } else {
+        gardenState = "working";
+        gardenActivity = `Working on #${activeClaim.bug.number}`;
+      }
+      activeTask = {
+        issueId: activeClaim.bug.id,
+        issueNumber: activeClaim.bug.number,
+        issueTitle: activeClaim.bug.title,
+      };
+    }
+
+    return {
+      id: agent.id,
+      name: agent.name,
+      model: agent.model,
+      level: agent.level,
+      burst: agent.burst,
+      burstUntil: agent.burstUntil ? agent.burstUntil.toISOString() : null,
+      createdAt: agent.createdAt.toISOString(),
+      revokedAt: agent.revokedAt ? agent.revokedAt.toISOString() : null,
+      personal: Boolean(agent.defaultProjectId),
+      currentProjectId: agent.apiKeys.find((key) => key.project)?.project?.id ?? null,
+      recent: lastUsedMs > recentCutoff,
+      gardenState,
+      gardenActivity,
+      activeTask,
+      apiKeys: agent.apiKeys.map((k) => ({
+        id: k.id,
+        prefix: k.prefix,
+        apiKey: revealAgentKey(k.sealedKey),
+        projectId: k.project?.id ?? null,
+        projectName: k.project?.name ?? null,
+        lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
+      })),
+      areaPreferences: agent.areaPreferences.map((p) => ({
+        projectId: p.projectArea.projectId,
+        projectAreaId: p.projectAreaId,
+      })),
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -254,88 +345,16 @@ export default async function AgentsSettingsPage() {
                 No agents yet. Register one under “Add an agent”, or approve an agent that asked at the approval page.
               </p>
             ) : (
-              <ul className="mt-3 divide-y divide-slate-100">
-                {mine.map((agent) => (
-                  <li key={agent.id} className="flex flex-col gap-2 py-3">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="break-words font-medium text-slate-900">
-                        {agent.name}
-                        {agent.defaultProjectId ? <span className="font-normal text-slate-500"> · personal</span> : null}
-                        {agent.model ? <span className="font-normal text-slate-500"> · {agent.model}</span> : null}
-                      </p>
-                      <Link href={`/settings/agents/${agent.id}/messages`} className="text-xs text-teal-700 hover:underline">
-                        Messages and instructions
-                      </Link>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {agent.revokedAt ? (
-                          <>
-                            Revoked <LocalTime date={agent.revokedAt} />
-                          </>
-                        ) : agent.apiKeys.length === 0 ? (
-                          <span>No key · added <LocalTime date={agent.createdAt} /></span>
-                        ) : (
-                          <span>
-                            {agent.apiKeys.some((key) => key.lastUsedAt) ? (
-                              <>
-                                Last used <RelativeTime date={agent.apiKeys.find((key) => key.lastUsedAt)!.lastUsedAt!} />
-                              </>
-                            ) : (
-                              <>Never used</>
-                            )}
-                            {" "}· added <LocalTime date={agent.createdAt} />
-                          </span>
-                        )}
-                      </p>
-                      {agent.revokedAt ? null : (
-                        <div className="mt-2 space-y-1.5">
-                          {agent.apiKeys.map((key) => (
-                            <AgentRowKey
-                              key={key.id}
-                              apiKey={revealAgentKey(key.sealedKey)}
-                              prefix={key.prefix}
-                              projectId={key.project?.id ?? null}
-                              projectName={key.project?.name ?? null}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {agent.revokedAt ? (
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-red-50 text-red-700">Revoked</Badge>
-                        <AgentControls
-                          revoked
-                          personal={Boolean(agent.defaultProjectId)}
-                          agentId={agent.id}
-                          agentName={agent.name}
-                          level={agent.level}
-                          levels={ownLevels}
-                          projects={projects}
-                          now={now}
-                        />
-                      </div>
-                    ) : (
-                      <AgentControls
-                        personal={Boolean(agent.defaultProjectId)}
-                        agentId={agent.id}
-                        agentName={agent.name}
-                        level={agent.level}
-                        levels={ownLevels}
-                        projects={projects}
-                        currentProjectId={agent.apiKeys.find((key) => key.project)?.project?.id}
-                        burst={agent.burst}
-                        burstUntil={agent.burstUntil}
-                        now={now}
-                        canSetBurst={isAdmin}
-                        areas={areas}
-                        areaPreferences={agent.areaPreferences.map((preference) => ({ projectId: preference.projectArea.projectId, projectAreaId: preference.projectAreaId }))}
-                      />
-                    )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <ManageAgentsList
+                agents={manageItems}
+                activeCount={activeCount}
+                maxActive={MAX_ACTIVE_AGENTS_PER_OWNER}
+                levels={ownLevels}
+                projects={projects}
+                areas={areas}
+                now={now.toISOString()}
+                canSetBurst={isAdmin}
+              />
             )}
           </section>
 
