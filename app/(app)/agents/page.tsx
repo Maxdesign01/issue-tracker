@@ -14,8 +14,20 @@ import { ManageAgentsList, type ManageAgentItem } from "@/app/(app)/settings/age
 import {
   agentsMutedClass,
   agentsPrimaryBtn,
+  agentsSecondaryBtn,
   agentsSurface,
 } from "@/app/(app)/settings/agents/agents-ui";
+import { agentActivity, agentEarnings } from "@/lib/points/agent-earnings";
+import { AGENT_WORKING_WINDOW_MS, classifyAgentStatus } from "@/lib/dashboard-overview";
+import { sendAgentRequestAction } from "@/app/actions/agent-requests";
+
+function latest(...dates: (Date | null | undefined)[]): Date | null {
+  let newest: Date | null = null;
+  for (const date of dates) {
+    if (date && (!newest || date.getTime() > newest.getTime())) newest = date;
+  }
+  return newest;
+}
 
 /** Decrypts a stored agent key for display; a missing or unreadable seal yields null so the row still renders. */
 function revealAgentKey(sealed: string | null): string | null {
@@ -27,7 +39,7 @@ function revealAgentKey(sealed: string | null): string | null {
   }
 }
 
-export const metadata = { title: "My agents" };
+export const metadata = { title: "Agent Fleet Command" };
 
 /**
  * Where "Create agent" goes. Creating an agent is its own page (built under a
@@ -37,15 +49,16 @@ export const metadata = { title: "My agents" };
 const CREATE_AGENT_HREF = "/settings/connect";
 
 /**
- * My agents: the signed-in person's own agents and nothing else (creating agents and the team list live on their own pages).
- * Its own top-level page, the "Manage agents" entry in the header's Agents menu; /settings/agents redirects here.
+ * Agent Fleet Command & Health Center:
+ * Real-time monitoring, heartbeat status, active mission tracking, rate budget
+ * gauges, priority task dispatch, and key lifecycle for your autonomous agents.
  */
 export default async function AgentsPage() {
   if (!isAgentPlatformEnabled()) {
     return (
       <div className="space-y-6">
         <div className="space-y-1">
-          <h1 className="text-2xl font-extrabold text-zk-text">Agents</h1>
+          <h1 className="text-2xl font-extrabold text-zk-text">Agent Fleet Command</h1>
           <p className={agentsMutedClass}>The agent platform feature is not enabled in this environment.</p>
         </div>
       </div>
@@ -72,6 +85,7 @@ export default async function AgentsPage() {
       console.error("[agents] approved agents were not listed", error);
     }
   }
+
   const mine = tenantId
     ? await prisma.agent.findMany({
         where: { ownerUserId: user.id, tenantId },
@@ -87,6 +101,8 @@ export default async function AgentsPage() {
           createdAt: true,
           revokedAt: true,
           defaultProjectId: true,
+          instructions: true,
+          reputation: true,
           apiKeys: {
             where: { revokedAt: null },
             select: {
@@ -97,6 +113,30 @@ export default async function AgentsPage() {
               project: { select: { id: true, name: true } },
             },
           },
+          claims: {
+            where: { releasedAt: null, status: "active" },
+            orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
+            take: 1,
+            select: {
+              claimedAt: true,
+              lastHeartbeatAt: true,
+              bug: {
+                select: {
+                  number: true,
+                  title: true,
+                  status: true,
+                  isDeleted: true,
+                  project: { select: { slug: true, name: true } },
+                },
+              },
+            },
+          },
+          questions: {
+            where: { answeredAt: null },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: 1,
+            select: { id: true, body: true, createdAt: true },
+          },
         },
       })
     : [];
@@ -104,11 +144,73 @@ export default async function AgentsPage() {
   const ownLevels = settableLevels({ isOwner: true, isTenantAdmin: isAdmin });
   const activeCount = mine.filter((agent) => !agent.revokedAt).length;
   const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
+  const ids = mine.map((agent) => agent.id);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const [earned, activity, pendingRequests, latestEvents] =
+    tenantId && ids.length > 0
+      ? await Promise.all([
+          agentEarnings(prisma, tenantId, ids),
+          agentActivity(prisma, tenantId, ids, startOfToday),
+          prisma.agentRequest.groupBy({
+            by: ["agentId"],
+            where: { agentId: { in: ids }, doneAt: null },
+            _count: { _all: true },
+          }),
+          prisma.agentEvent.groupBy({
+            by: ["actorAgentId"],
+            where: { actorAgentId: { in: ids } },
+            _max: { createdAt: true },
+          }),
+        ])
+      : [new Map<string, number>(), new Map(), [], []];
+
+  const pendingBy = new Map(pendingRequests.map((row) => [row.agentId, row._count._all]));
+  const eventById = new Map(latestEvents.map((row) => [row.actorAgentId, row._max.createdAt ?? null]));
+  const workingCutoff = now.getTime() - AGENT_WORKING_WINDOW_MS;
 
   const manageItems: ManageAgentItem[] = mine.map((agent) => {
     const lastUsedMs = agent.apiKeys
       .map((key) => (key.lastUsedAt ? key.lastUsedAt.getTime() : 0))
       .reduce((a, b) => Math.max(a, b), 0);
+
+    const unanswered = agent.questions[0] ?? null;
+    const claim = agent.claims[0] ?? null;
+    const claimedBug = claim?.bug ?? null;
+    const heartbeat = claim?.lastHeartbeatAt ?? claim?.claimedAt ?? null;
+    const claimIsLive =
+      claim !== null &&
+      heartbeat !== null &&
+      heartbeat.getTime() >= workingCutoff &&
+      claimedBug !== null &&
+      !claimedBug.isDeleted &&
+      claimedBug.status === "in_progress";
+
+    const lastSeenAt = latest(
+      heartbeat,
+      eventById.get(agent.id) ?? null,
+      ...agent.apiKeys.map((key) => key.lastUsedAt),
+    );
+
+    const status = classifyAgentStatus({
+      hasUnansweredQuestion: unanswered !== null,
+      hasActiveClaim: claimIsLive,
+      lastSeenAt,
+      now,
+    });
+
+    let activityText: string;
+    if (status === "waiting") {
+      activityText = "Waiting for your answer";
+    } else if (status === "working" && claimedBug) {
+      activityText = `Working on #${claimedBug.number} ${claimedBug.title}`;
+    } else if (status === "idle") {
+      activityText = "Standing by";
+    } else {
+      activityText = "No recent activity";
+    }
+
     return {
       id: agent.id,
       name: agent.name,
@@ -122,6 +224,34 @@ export default async function AgentsPage() {
       personal: Boolean(agent.defaultProjectId),
       currentProjectId: agent.apiKeys.find((key) => key.project)?.project?.id ?? null,
       recent: lastUsedMs >= recentCutoff,
+      status,
+      activity: activityText,
+      activeClaim:
+        claimIsLive && claimedBug
+          ? {
+              number: claimedBug.number,
+              title: claimedBug.title,
+              status: claimedBug.status,
+              projectSlug: claimedBug.project?.slug ?? null,
+              claimedAt: (claim.claimedAt ?? now).toISOString(),
+              lastHeartbeatAt: heartbeat ? heartbeat.toISOString() : null,
+            }
+          : null,
+      unansweredQuestion: unanswered
+        ? {
+            id: unanswered.id,
+            body: unanswered.body,
+            createdAt: unanswered.createdAt.toISOString(),
+          }
+        : null,
+      instructions: agent.instructions,
+      reputation: agent.reputation,
+      earnedPoints: earned.get(agent.id) ?? 0,
+      pointsToday: activity.get(agent.id)?.pointsToday ?? 0,
+      bidsCount: activity.get(agent.id)?.bids ?? 0,
+      commentsCount: activity.get(agent.id)?.comments ?? 0,
+      pendingRequests: pendingBy.get(agent.id) ?? 0,
+      lastSeenAt: lastSeenAt ? lastSeenAt.toISOString() : null,
       apiKeys: agent.apiKeys.map((key) => ({
         id: key.id,
         prefix: key.prefix,
@@ -138,14 +268,23 @@ export default async function AgentsPage() {
       <div className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1">
-            <h1 className="text-3xl font-extrabold tracking-tight text-zk-text">My agents</h1>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-3 w-3 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <h1 className="text-3xl font-extrabold tracking-tight text-zk-text">Agent Fleet Command</h1>
+            </div>
             <p className={agentsMutedClass}>
-              Each agent has its own key. Copy sends that key and this site to that agent only.
+              Live autonomous fleet health, real-time mission telemetry, rate quotas, and instant instruction dispatch.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link href="/settings/agents/pair" className={agentsSecondaryBtn}>
+              Pair code
+            </Link>
             <Link href={CREATE_AGENT_HREF} className={agentsPrimaryBtn}>
-              Create agent
+              Connect agent
             </Link>
           </div>
         </div>
@@ -154,7 +293,8 @@ export default async function AgentsPage() {
       {!tenantId ? (
         <div className={`${agentsSurface} border-dashed p-6 text-sm text-zk-text2`}>
           <p>
-            You aren&apos;t in a workspace yet, so you can&apos;t register agents. Join a workspace via an invite from your team, or create your own workspace to start managing agents.
+            You aren&apos;t in a workspace yet, so you can&apos;t register agents. Join a workspace via an invite from
+            your team, or create your own workspace to start managing agents.
           </p>
           <div className="mt-3">
             <Link href="/tenants" className={agentsPrimaryBtn}>
@@ -163,7 +303,7 @@ export default async function AgentsPage() {
           </div>
         </div>
       ) : (
-        <section aria-labelledby="mine-heading" className="space-y-3">
+        <section aria-labelledby="mine-heading" className="space-y-4">
           <h2 id="mine-heading" className="sr-only">
             Your agents
           </h2>
@@ -178,6 +318,7 @@ export default async function AgentsPage() {
               projects={projects}
               now={now.toISOString()}
               canSetBurst={isAdmin}
+              onSendInstruction={sendAgentRequestAction}
             />
           )}
         </section>

@@ -13,6 +13,18 @@ import { UserSearch } from "@/components/user-search";
 import { VoteButton } from "@/components/vote-button";
 import { WebhookManagement } from "@/components/webhook-management";
 import { createWebhookAction, listWebhooksAction } from "@/app/actions/webhooks";
+import { ManageAgentsList, type ManageAgentItem } from "@/app/(app)/settings/agents/manage-agents-list";
+
+vi.mock("@/app/(app)/settings/agents/actions", () => ({
+  deleteAgentAction: vi.fn(),
+  regenerateAgentKeyAction: vi.fn(),
+  revokeAgentAction: vi.fn(),
+  setAgentBurstAction: vi.fn(),
+  setAgentLevelAction: vi.fn(),
+  pairAgentAction: vi.fn(),
+}));
+
+
 
 vi.mock("@/app/actions/issues", () => ({
   addCommentAction: vi.fn(),
@@ -214,4 +226,68 @@ describe("component accessibility (axe)", () => {
     }
   });
 
+  it("ManageAgentsList has no a11y violations and renders fleet status telemetry", async () => {
+    const mockAgents: ManageAgentItem[] = [
+      {
+        id: "a1",
+        name: "Desktop-Worker-01",
+        model: "Claude 3.7",
+        level: "working",
+        burst: false,
+        burstUntil: null,
+        createdAt: new Date().toISOString(),
+        revokedAt: null,
+        personal: false,
+        avatar: null,
+        currentProjectId: "p1",
+        recent: true,
+        status: "working",
+        activity: "Working on #42 Fix responsive layout",
+        activeClaim: {
+          number: 42,
+          title: "Fix responsive layout",
+          status: "in_progress",
+          projectSlug: "zedu-desktop",
+          claimedAt: new Date().toISOString(),
+          lastHeartbeatAt: new Date().toISOString(),
+        },
+        unansweredQuestion: null,
+        instructions: "Focus on desktop bugs today.",
+        reputation: 5,
+        earnedPoints: 45,
+        pointsToday: 15,
+        bidsCount: 12,
+        commentsCount: 6,
+        pendingRequests: 0,
+        lastSeenAt: new Date().toISOString(),
+        apiKeys: [
+          {
+            id: "k1",
+            prefix: "zk_live_123",
+            apiKey: "zk_live_123456789",
+            projectId: "p1",
+            projectName: "Zedu Desktop",
+            lastUsedAt: new Date().toISOString(),
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <ManageAgentsList
+        agents={mockAgents}
+        activeCount={1}
+        maxActive={5}
+        levels={["working"]}
+        projects={[{ id: "p1", name: "Zedu Desktop" }]}
+        now={new Date().toISOString()}
+        canSetBurst={false}
+      />,
+    );
+
+    await expectNoA11yViolations(container);
+    expect(screen.getByText("Desktop-Worker-01")).toBeInTheDocument();
+    expect(screen.getByText("Working")).toBeInTheDocument();
+    expect(screen.getByText(/Fix responsive layout/)).toBeInTheDocument();
+  });
 });
