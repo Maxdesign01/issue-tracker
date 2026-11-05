@@ -12,7 +12,7 @@ export const GETTING_STARTED_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 /** Most workspace ids the cookie keeps, so it can't grow without bound. */
 const MAX_DISMISSED = 50;
 
-export type GettingStartedStepId = "workspace" | "project" | "issue" | "invite";
+export type GettingStartedStepId = "workspace" | "project" | "issue" | "agent" | "invite";
 
 export type GettingStartedStep = {
   id: GettingStartedStepId;
@@ -22,9 +22,9 @@ export type GettingStartedStep = {
   done: boolean;
 };
 
-type Db = Pick<PrismaClient, "project" | "bug" | "membership" | "tenantInvite">;
+type Db = Pick<PrismaClient, "project" | "bug" | "agent" | "membership" | "tenantInvite">;
 
-/** The steps for one workspace, from four cheap counts. */
+/** The steps for one workspace, from five cheap counts. */
 export async function gettingStartedFor(
   db: Db,
   tenantId: string,
@@ -32,9 +32,11 @@ export async function gettingStartedFor(
   slug: string,
   { now = new Date() }: { now?: Date } = {},
 ): Promise<{ steps: GettingStartedStep[]; complete: boolean }> {
-  const [projects, issues, members, pendingInvites] = await Promise.all([
+  const [projects, issues, agents, members, pendingInvites] = await Promise.all([
     db.project.count({ where: { tenantId } }),
     db.bug.count({ where: { tenantId, isDeleted: false } }),
+    // #2724: a workspace works through its agents, so connecting one is a step of its own.
+    db.agent.count({ where: { tenantId } }),
     db.membership.count({ where: { tenantId } }),
     db.tenantInvite.count({ where: { tenantId, acceptedAt: null, expiresAt: { gt: now } } }),
   ]);
@@ -59,6 +61,13 @@ export async function gettingStartedFor(
       hint: "Say what you expected, what happened instead, and how to make it happen again.",
       href: newIssuePath(slug),
       done: issues > 0,
+    },
+    {
+      id: "agent",
+      label: "Connect your first agent",
+      hint: "Pair an agent in Settings → Agents; it files reports, fixes issues and reviews work for the workspace.",
+      href: "/settings/agents",
+      done: agents > 0,
     },
     {
       id: "invite",

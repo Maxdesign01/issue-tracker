@@ -102,7 +102,14 @@ export default async function AppLayout({
 
   let pendingEscalationsCount = 0;
   let dockAgents: DockAgent[] = [];
+  // How many people the workspace has: the dock's leaderboard link hides for a workspace of one (#2724).
+  let workspaceMembers = 0;
   if (tenantId) {
+    try {
+      workspaceMembers = await prisma.membership.count({ where: { tenantId } });
+    } catch (error) {
+      console.error("[layout] workspace member count failed", error);
+    }
     try {
       pendingEscalationsCount = await countPendingEscalations(user.id, tenantId);
     } catch (error) {
@@ -138,6 +145,7 @@ export default async function AppLayout({
     console.error("[layout] shortcut setting failed", error);
   }
 
+  const appVersion = appVersionLabel();
   return (
     // data-app-shell switches the page (and its dialogs and toasts) to Inter; see globals.css.
     <div data-app-shell="" className="flex min-h-screen flex-col bg-zk-bg">
@@ -157,6 +165,7 @@ export default async function AppLayout({
           defaultProjectSlug={defaultProjectSlug}
           reportFormUrl={REPORT_FORM_URL}
           organizationAdmin={tenantId !== null && isOrganizationAdmin(membershipRole, user.role)}
+          version={appVersion}
         />
         <main
           id={MAIN_CONTENT_ID}
@@ -170,7 +179,12 @@ export default async function AppLayout({
         </main>
       </div>
       {/* The agents dock keeps the page's foot clear of its floor line itself, as tall as what stands on it. */}
-      <AgentsDock agents={dockAgents} defaultProjectSlug={defaultProjectSlug} version={appVersionLabel()} />
+      <AgentsDock
+        agents={dockAgents}
+        defaultProjectSlug={defaultProjectSlug}
+        organizationAdmin={tenantId !== null && isOrganizationAdmin(membershipRole, user.role)}
+        workspaceMembers={workspaceMembers}
+      />
       <FocusMainOnNavigate />
       <KeyboardShortcuts
         enabled={shortcutsEnabled}

@@ -4,10 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { agentPageHref } from "@/lib/header-nav";
-import { CookieSettingsLink } from "@/components/consent-banner";
 import { projectPath } from "@/lib/project-paths";
 import { isReservedProjectSlug } from "@/lib/project-slug";
-import { AGENTS_DOCK_HEIGHT } from "@/lib/agents-dock";
+import { AGENTS_DOCK_HEIGHT, isAgentsDockWorkPath } from "@/lib/agents-dock";
 import { PAGE_CONTAINER_CLASS } from "@/components/page-container";
 import { formatZ } from "@/lib/points/rules";
 import { updateMood } from "@/components/agent-robots/moods";
@@ -119,23 +118,29 @@ const RANK: Record<DockAgent["status"], number> = { waiting: 0, stuck: 1, workin
  * on an agent opens its details in its own row; pinned (the default), they
  * also stand on a floor line at the foot of the page. Hover an agent on the
  * floor for its card; click it to open its page. Beside the button, the
- * leaderboard and Workstream (the agents' work feed, drawn for people,
- * #workstream) are always there, with the running version under them, even
- * with no agents and on the pages that manage agents, where the agents
- * themselves are left out because those pages list them already. Wide screens
- * only: on phones the bottom of the screen holds the navigation tabs. Wording
- * stays plain: no issue numbers or title tags.
+ * leaderboard (hidden while the workspace has one member) and Workstream (the
+ * agents' work feed, drawn for people, #workstream) are there. The bar shows
+ * only on work pages (#2724): the workspace's home, feed, inbox and activity,
+ * and a project's lists, ideas, issues, issue pages and workstream. Settings,
+ * admin, docs and the agents' own pages leave it off, and so do pages where
+ * you have no agents: there one next-step card points at connecting or
+ * creating one. The cookie choice and the running version live in the account
+ * menu. Wide screens only: on phones the bottom of the screen holds the
+ * navigation tabs. Wording stays plain: no issue numbers or title tags.
  */
 export function AgentsDock({
   agents: given,
   defaultProjectSlug = null,
-  version,
+  organizationAdmin = false,
+  workspaceMembers = 0,
 }: {
   agents: DockAgent[];
   /** Workstream's project on pages outside a project. */
   defaultProjectSlug?: string | null;
-  /** The running version (package version and short commit), in tiny grey text under the links. */
-  version?: string;
+  /** Owner or admin of the workspace: the no-agents card offers connecting one, not creating one. */
+  organizationAdmin?: boolean;
+  /** How many people are in the workspace, for the leaderboard link (hidden for a workspace of one). */
+  workspaceMembers?: number;
 }) {
   const prefs = useDockPrefs();
   const router = useRouter();
@@ -154,8 +159,7 @@ export function AgentsDock({
   const floorHeight = pixelOnFloor ? Math.round(CANVAS_H * ROBOT_SCALE) : LOW_FLOOR_H;
   const pathname = usePathname();
   const projectSlug = projectSlugFromPath(pathname) ?? defaultProjectSlug;
-  // My agents and an agent's own page manage the agents and list them already: the dock would only repeat them.
-  const managing = pathname === "/agents/mine" || pathname.startsWith("/agent/");
+  const onWorkPage = isAgentsDockWorkPath(pathname);
   const [panel, setPanel] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   // How wide each nameplate is closed (its name and status) and opened (with what it has earned), so its character stands just beside it.
@@ -181,7 +185,7 @@ export function AgentsDock({
   const view = useRef<FloorMode>(null); // which floor the robots were last placed on
   const anchors = useRef(new Map<string, HTMLElement>());
   // Pinned, the agents stand on a floor line at the foot of the page; the panel is a plain list beside it, with no floor of its own.
-  const mode: FloorMode = prefs.pinned && !managing ? "footer" : null;
+  const mode: FloorMode = prefs.pinned ? "footer" : null;
   const { column, minLeft, maxRight } = useColumn(AGENTS_BUTTON_ROOM, LINKS_ROOM);
   // The agents stand together in the middle of the screen, one beside the next: opened up while the cursor is on
   // the strip (and there is room for it), closed up otherwise.
@@ -353,9 +357,12 @@ export function AgentsDock({
     };
   }, [hover, panel]);
 
-  // The leaderboard and Workstream, beside the Agents button: always there, agents or not.
-  const links = <DockLinks projectSlug={projectSlug} version={version} />;
-  if (all.length === 0 || managing) return <Strip height={AGENTS_DOCK_HEIGHT} links={links} />;
+  // The leaderboard (unless the workspace is one person) and Workstream, beside the Agents button.
+  const links = <DockLinks projectSlug={projectSlug} members={workspaceMembers} />;
+  // The bar belongs on work pages only (#2724); elsewhere the page keeps its whole height.
+  if (!onWorkPage) return null;
+  // No agents yet: one next-step card stands in place of the empty bar.
+  if (all.length === 0) return <DockNextStep organizationAdmin={organizationAdmin} />;
 
   const showLabels = () => {
     clearTimeout(labelTimer.current);
@@ -642,6 +649,35 @@ function plain(text: string): string {
 }
 
 /**
+ * A work page with no agents yet (#2724): one next-step card in place of the
+ * empty bar. Workspace owners and admins are pointed at connecting an agent;
+ * everyone else at creating one. Wide screens only, like the bar it replaces.
+ */
+function DockNextStep({ organizationAdmin }: { organizationAdmin: boolean }) {
+  return (
+    <section
+      aria-label="Your next step"
+      className="fixed bottom-5 left-1/2 z-30 hidden w-[min(92vw,34rem)] -translate-x-1/2 lg:block"
+    >
+      <div className="flex items-center gap-4 rounded-2xl border border-zk-border bg-zk-surface px-5 py-3.5 shadow-[0_12px_36px_rgba(11,23,51,0.12)]">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-zk-text">
+            {organizationAdmin ? "Connect an agent to start filing and fixing issues" : "Create an agent to start earning"}
+          </p>
+          <p className="mt-0.5 text-xs text-zk-text2">Agents file reports, fix issues and review work, and they earn for you.</p>
+        </div>
+        <Link
+          href={organizationAdmin ? "/settings/agents" : "/agents/mine"}
+          className="inline-flex min-h-9 shrink-0 items-center rounded-full bg-electric-blue-strong px-4 text-xs font-bold text-white transition hover:bg-[#2552af] focus-visible:outline-2 focus-visible:outline-electric-blue"
+        >
+          {organizationAdmin ? "Connect an agent" : "Create an agent"}
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+/**
  * The strip across the foot of the screen (#agents-dock): solid, so the page
  * never shows through it, with the leaderboard and Workstream at its right end
  * as on the site. The page keeps its height free at its foot, so everything
@@ -663,18 +699,25 @@ function Strip({ height, links, children }: { height: number; links: ReactNode; 
   );
 }
 
-/** Right side of the strip: the leaderboard, with the workstream as an icon under it, and the running version (#workstream). */
-function DockLinks({ projectSlug, version }: { projectSlug: string | null; version?: string }) {
+/**
+ * Right side of the strip: the leaderboard (unless the workspace is one
+ * person, who can only rank against themselves) and the workstream as an icon
+ * (#workstream). The cookie choice and the running version live in the
+ * account menu (#2724).
+ */
+function DockLinks({ projectSlug, members }: { projectSlug: string | null; members: number }) {
   return (
     <div className="flex shrink-0 flex-col items-end gap-0.5">
-      <Link
-        href={LEADERBOARD_HREF}
-        title="Leaderboard"
-        aria-label="Leaderboard"
-        className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-zk-text2 hover:bg-zk-chip hover:text-zk-text focus-visible:outline-2 focus-visible:outline-electric-blue"
-      >
-        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z" /><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3" /></svg>
-      </Link>
+      {members > 1 ? (
+        <Link
+          href={LEADERBOARD_HREF}
+          title="Leaderboard"
+          aria-label="Leaderboard"
+          className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-zk-text2 hover:bg-zk-chip hover:text-zk-text focus-visible:outline-2 focus-visible:outline-electric-blue"
+        >
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z" /><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3" /></svg>
+        </Link>
+      ) : null}
       {projectSlug ? (
         <Link
           href={projectPath(projectSlug, "/workstream")}
@@ -687,12 +730,6 @@ function DockLinks({ projectSlug, version }: { projectSlug: string | null; versi
             <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
           </svg>
         </Link>
-      ) : null}
-      <CookieSettingsLink className="text-[9px] leading-none text-zk-muted hover:text-zk-text hover:underline" />
-      {version ? (
-        <span className="mr-1 select-all font-mono text-[9px] leading-none text-zk-muted" title="The version running">
-          {version}
-        </span>
       ) : null}
     </div>
   );

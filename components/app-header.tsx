@@ -17,6 +17,7 @@ import {
 import { isSuperAdmin, type AppRole } from "@/lib/roles";
 import { Avatar } from "@/components/avatar";
 import { AccountThemeSelector } from "@/components/theme-toggle";
+import { CookieSettingsLink } from "@/components/consent-banner";
 import { recentNotificationsAction } from "@/app/actions/notifications";
 import { LocalTime } from "@/components/local-time";
 import { BASE_PATH } from "@/lib/base-path";
@@ -270,6 +271,7 @@ export function AppHeader({
   reportFormUrl,
   organizationAdmin = false,
   defaultProjectSlug = null,
+  version,
 }: {
   /** The first project in the current workspace, for pages whose URL names none yet. */
   defaultProjectSlug?: string | null;
@@ -286,6 +288,8 @@ export function AppHeader({
   reportFormUrl?: string;
   /** Owner or admin of the current organization, or the site super admin: shows /org in the menus. */
   organizationAdmin?: boolean;
+  /** The running version, in tiny grey text at the foot of the account menu (#2724). */
+  version?: string;
 }) {
   const pathname = usePathname();
   const projectSlug = useParams<{ project?: string }>()?.project ?? defaultProjectSlug;
@@ -391,6 +395,15 @@ export function AppHeader({
                 </MenuLink>
                 {reportFormUrl ? (
                   <MenuLink href={reportFormUrl}>Report issue</MenuLink>
+                ) : null}
+                {/* #2724: the cookie choice and the running version live here, not in the agents bar. */}
+                <CookieSettingsLink
+                  className={`${linkFocus} flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-semibold text-zk-text hover:bg-zk-chip`}
+                />
+                {version ? (
+                  <p className="select-all px-3 pb-1 font-mono text-[11px] leading-none text-zk-muted" title="The version running">
+                    {version}
+                  </p>
                 ) : null}
                 <div className="mx-2 h-px bg-zk-divider" />
                 <SignOutButton
